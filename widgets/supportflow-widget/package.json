@@ -1,0 +1,29 @@
+{
+  "name": "supportflow-widget",
+  "version": "1.0.0",
+  "description": "SupportFlow chat widget — installable into any project via script tag, with an interactive CLI that asks which backend endpoints the widget may use.",
+  "type": "commonjs",
+  "main": "src/widget.js",
+  "bin": {
+    "supportflow-widget": "bin/cli.js"
+  },
+  "files": [
+    "src/widget.js",
+    "bin/cli.js",
+    "README.md"
+  ],
+  "scripts": {
+    "demo": "node demo/serve.js",
+    "init": "node bin/cli.js"
+  },
+  "keywords": [
+    "supportflow",
+    "chat",
+    "widget",
+    "customer-support"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

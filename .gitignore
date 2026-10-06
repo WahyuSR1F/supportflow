@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.*
+*.bak
+supportflow.zip
+tsconfig.tsbuildinfo
+tsconfig.node.tsbuildinfo
+.DS_Store

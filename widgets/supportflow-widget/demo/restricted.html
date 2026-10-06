@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project tujuan — demo widget endpoint terbatas</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 60px auto; padding: 0 20px; color: #1c211e; }
+      h1 { letter-spacing: -.5px; }
+      code { background: #f1f3f0; padding: 2px 6px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Project tujuan — instalasi endpoint tertentu</h1>
+    <p>
+      Halaman ini hanya mengizinkan endpoint <code>history</code>. Widget diharapkan:
+      <strong>tidak</strong> bisa mengirim pesan (input nonaktif + pesan system) dan
+      tidak memanggil <code>/api/chat/public</code>.
+    </p>
+
+    <script src="../src/widget.js"></script>
+    <script>
+      SupportFlowWidget.init({
+        baseUrl: 'http://localhost:3000',
+        conversationId: 'demo-widget-restricted',
+        title: 'Demo Terbatas',
+        accentColor: '#e87843',
+        endpoints: ['history']
+      })
+    </script>
+  </body>
+</html>

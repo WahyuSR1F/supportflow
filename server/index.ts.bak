@@ -1,0 +1,435 @@
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createClient } from '@libsql/client'
+import { systemPrompt, HANDOFF_ACKNOWLEDGEMENT, OUT_OF_SCOPE_HANDOFF, HANDOFF_MARKER, isEscalationRequest, answerFromKnowledgeBase } from './knowledge-base.js'
+import { registerWithEmailAndPassword, loginWithEmailAndPassword, googleConfigured, googleAuthUrl, exchangeGoogleCode, signSessionJwt } from './auth.js'
+
+type ChatMessage = { role: 'user' | 'assistant'; content: string }
+type Json = Record<string, unknown>
+type AuthIdentity = { openId: string; name?: string; email?: string }
+
+type StoredMessage = { role: 'user' | 'assistant'; content: string }
+type ConversationStatus = 'AI' | 'HUMAN_HANDOFF' | 'RESOLVED'
+
+const SESSION_COOKIE = 'webdev_app_session'
+const NONCE_COOKIE = 'supportflow_oauth_nonce'
+const WIDGET_CONVERSATION_ID = 'northstar-widget-demo'
+
+let databaseClient: ReturnType<typeof createClient> | null = null
+let databaseSchema: Promise<void> | null = null
+
+const json = (response: ServerResponse, payload: Json, status = 200) => {
+  response.statusCode = status
+  response.setHeader('content-type', 'application/json; charset=utf-8')
+  response.setHeader('cache-control', 'no-store')
+  response.end(JSON.stringify(payload))
+}
+
+const setCookies = (response: ServerResponse, cookies: string[]) => response.setHeader('set-cookie', cookies)
+const cookie = (name: string, value: string, options: string) => `${name}=${value}; ${options}`
+const clearCookie = (name: string) => cookie(name, '', 'Path=/; Max-Age=0; HttpOnly; SameSite=None; Secure')
+const parseCookies = (request: IncomingMessage) => Object.fromEntries((request.headers.cookie ?? '').split(';').map((part) => part.trim().split('=')).filter(([name, value]) => name && value).map(([name, ...value]) => [name, value.join('=')]))
+const encodeBase64Url = (value: string | Buffer) => Buffer.from(value).toString('base64url')
+const decodeBase64Url = (value: string) => Buffer.from(value, 'base64url').toString('utf8')
+
+const getDatabase = () => {
+  const url = process.env.TURSO_DATABASE_URL
+  const authToken = process.env.TURSO_AUTH_TOKEN
+  if (!url || !authToken) throw new Error('Turso database is not configured')
+  if (!databaseClient) databaseClient = createClient({ url, authToken })
+  return databaseClient
+}
+
+const ensureDatabase = async () => {
+  if (!databaseSchema) {
+    const db = getDatabase()
+    databaseSchema = (async () => {
+      await db.execute(`CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('user', 'assistant')), content TEXT NOT NULL, created_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS conversation_status (conversation_id TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT, updated_at TEXT NOT NULL)`)
+      await db.execute(`CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at)`)
+    })().catch((error) => {
+      databaseSchema = null
+      throw error
+    })
+  }
+  await databaseSchema
+  return getDatabase()
+}
+
+const databaseReady = async () => {
+  try {
+    const db = await ensureDatabase()
+    await db.execute({ sql: 'SELECT 1' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+const persistMessage = async (conversationId: string, message: StoredMessage) => {
+  const db = await ensureDatabase()
+  const now = new Date().toISOString()
+  await db.execute({ sql: 'INSERT OR IGNORE INTO conversations (id, workspace_id, created_at, updated_at) VALUES (?, ?, ?, ?)', args: [conversationId, 'northstar-goods', now, now] })
+  await db.execute({ sql: 'UPDATE conversations SET updated_at = ? WHERE id = ?', args: [now, conversationId] })
+  await db.execute({ sql: 'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)', args: [`${conversationId}:${Date.now()}:${randomBytes(5).toString('hex')}`, conversationId, message.role, message.content, now] })
+}
+
+const loadHistory = async (conversationId: string) => {
+  const db = await ensureDatabase()
+  const result = await db.execute({ sql: 'SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 80', args: [conversationId] })
+  return result.rows.map((row) => ({ role: String(row.role) as StoredMessage['role'], content: String(row.content) }))
+}
+
+const setConversationStatus = async (conversationId: string, status: ConversationStatus, reason = '') => {
+  const db = await ensureDatabase()
+  const now = new Date().toISOString()
+  await db.execute({ sql: `INSERT INTO conversation_status (conversation_id, status, reason, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET status = excluded.status, reason = excluded.reason, updated_at = excluded.updated_at`, args: [conversationId, status, reason, now] })
+}
+
+const getConversationStatus = async (conversationId: string): Promise<{ status: ConversationStatus; reason: string } | null> => {
+  const db = await ensureDatabase()
+  const result = await db.execute({ sql: 'SELECT status, reason FROM conversation_status WHERE conversation_id = ?', args: [conversationId] })
+  const row = result.rows[0]
+  if (!row) return null
+  return { status: String(row.status) as ConversationStatus, reason: String(row.reason ?? '') }
+}
+
+const whatsappConfigured = () => Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_VERIFY_TOKEN)
+
+const verifyMetaSignature = (rawBody: string, signature: string | undefined) => {
+  const appSecret = process.env.META_APP_SECRET
+  if (!appSecret) return process.env.NODE_ENV !== 'production'
+  if (!signature?.startsWith('sha256=')) return false
+  const expected = createHmac('sha256', appSecret).update(rawBody).digest('hex')
+  const received = signature.slice('sha256='.length)
+  return received.length === expected.length && timingSafeEqual(Buffer.from(received), Buffer.from(expected))
+}
+
+const sendWhatsAppText = async (to: string, body: string) => {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+  const version = process.env.WHATSAPP_GRAPH_VERSION ?? 'v26.0'
+  if (!phoneNumberId || !accessToken) throw new Error('WhatsApp outbound messaging is not configured')
+  const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body } }),
+  })
+  const payload = await response.json() as { messages?: Array<{ id?: string }>; error?: { message?: string } }
+  if (!response.ok || payload.error) throw new Error(payload.error?.message ?? `WhatsApp send failed (${response.status})`)
+  return payload.messages?.[0]?.id ?? null
+}
+
+const handleWhatsAppWebhook = async (rawBody: string) => {
+  const payload = JSON.parse(rawBody) as { entry?: Array<{ changes?: Array<{ value?: { messages?: Array<{ from?: string; type?: string; text?: { body?: string } }> } }> }> }
+  let received = 0
+  let replied = 0
+  for (const entry of payload.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      for (const incoming of change.value?.messages ?? []) {
+        if (incoming.type !== 'text' || !incoming.from || !incoming.text?.body) continue
+        received += 1
+        const conversationId = `whatsapp:${incoming.from}`
+        await persistMessage(conversationId, { role: 'user', content: incoming.text.body })
+        if (process.env.WHATSAPP_AUTO_REPLY === 'true' && whatsappConfigured()) {
+          const history = await loadHistory(conversationId)
+          const reply = await callLiveLlm(history.slice(-12))
+          await sendWhatsAppText(incoming.from, reply)
+          await persistMessage(conversationId, { role: 'assistant', content: reply })
+          replied += 1
+        }
+      }
+    }
+  }
+  return { received, replied }
+}
+
+const signJwt = (identity: AuthIdentity) => {
+  const secret = process.env.MANUS_JWT_SECRET
+  const appId = process.env.MANUS_PROJECT_ID
+  if (!secret || !appId) throw new Error('Authentication runtime is not configured')
+  const header = encodeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+  const payload = encodeBase64Url(JSON.stringify({ appId, openId: identity.openId, name: identity.name, email: identity.email, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7 }))
+  const unsigned = `${header}.${payload}`
+  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`
+}
+
+const verifyJwt = (token: string): AuthIdentity | null => {
+  try {
+    const [encodedHeader, encodedPayload, encodedSignature] = token.split('.')
+    if (!encodedHeader || !encodedPayload || !encodedSignature || !process.env.MANUS_JWT_SECRET) return null
+    const header = JSON.parse(decodeBase64Url(encodedHeader)) as { alg?: string }
+    const payload = JSON.parse(decodeBase64Url(encodedPayload)) as { appId?: string; openId?: string; name?: string; email?: string; exp?: number }
+    const expected = createHmac('sha256', process.env.MANUS_JWT_SECRET).update(`${encodedHeader}.${encodedPayload}`).digest()
+    const received = Buffer.from(encodedSignature, 'base64url')
+    if (header.alg !== 'HS256' || received.length !== expected.length || !timingSafeEqual(received, expected)) return null
+    if (payload.appId !== process.env.MANUS_PROJECT_ID || !payload.openId || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
+    return { openId: payload.openId, name: payload.name, email: payload.email }
+  } catch {
+    return null
+  }
+}
+
+const readRawBody = async (request: IncomingMessage) => {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buffer.length
+    if (size > 64_000) throw new Error('Request body is too large')
+    chunks.push(buffer)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+const readBody = async (request: IncomingMessage) => readRawBody(request)
+
+const callLiveLlm = async (messages: ChatMessage[]) => {
+  const apiUrl = process.env.MANUS_API_URL
+  const apiKey = process.env.MANUS_API_KEY
+  if (!apiUrl || !apiKey) throw new Error('Managed LLM runtime is not configured')
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20_000)
+  try {
+    const response = await fetch(`${apiUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-5-mini', messages: [{ role: 'system', content: systemPrompt }, ...messages] }),
+      signal: controller.signal,
+    })
+    const payload = await response.json() as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> }
+    if (!response.ok || payload.error) throw new Error(payload.error?.message ?? `LLM request failed (${response.status})`)
+    const content = payload.choices?.[0]?.message?.content?.trim()
+    if (!content) throw new Error('LLM returned an empty response')
+    return content
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+const exchangeOAuthCode = async (code: string, redirectUri: string) => {
+  const apiUrl = process.env.MANUS_OAUTH_API_URL
+  const clientId = process.env.MANUS_PROJECT_ID
+  if (!apiUrl || !clientId) throw new Error('OAuth runtime is not configured')
+  const exchangeResponse = await fetch(`${apiUrl}/webdev.v1.WebDevAuthPublicService/ExchangeToken`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clientId, grantType: 'authorization_code', code, redirectUri }) })
+  const exchange = await exchangeResponse.json() as { accessToken?: string; error?: { message?: string } }
+  if (!exchangeResponse.ok || !exchange.accessToken) throw new Error(exchange.error?.message ?? 'OAuth token exchange failed')
+  const userResponse = await fetch(`${apiUrl}/webdev.v1.WebDevAuthPublicService/GetUserInfo`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accessToken: exchange.accessToken }) })
+  const user = await userResponse.json() as { openId?: string; name?: string; email?: string; error?: { message?: string } }
+  if (!userResponse.ok || !user.openId) throw new Error(user.error?.message ?? 'OAuth identity lookup failed')
+  return { openId: user.openId, name: user.name, email: user.email } satisfies AuthIdentity
+}
+
+const authStart = (response: ServerResponse, redirectUri: string) => {
+  const portal = process.env.MANUS_OAUTH_PORTAL_URL
+  const appId = process.env.MANUS_PROJECT_ID
+  if (!portal || !appId) return json(response, { error: 'OAuth runtime is not configured' }, 500)
+  const parsed = new URL(redirectUri)
+  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.pathname.endsWith('/manus-oauth/callback')) return json(response, { error: 'Invalid OAuth redirect URI' }, 400)
+  const nonce = randomBytes(24).toString('base64url')
+  const state = encodeBase64Url(JSON.stringify({ redirectUri, nonce }))
+  const authUrl = new URL('/app-auth', portal)
+  authUrl.searchParams.set('appId', appId)
+  authUrl.searchParams.set('redirectUri', redirectUri)
+  authUrl.searchParams.set('state', state)
+  authUrl.searchParams.set('responseType', 'code')
+  setCookies(response, [cookie(NONCE_COOKIE, nonce, 'Path=/; Max-Age=600; HttpOnly; SameSite=None; Secure')])
+  response.statusCode = 302
+  response.setHeader('location', authUrl.toString())
+  response.end()
+}
+
+export async function handleSupportFlowApi(request: IncomingMessage, response: ServerResponse) {
+  const url = new URL(request.url ?? '/', 'http://localhost')
+  const method = request.method ?? 'GET'
+  const cookies = parseCookies(request)
+
+  if (method === 'GET' && url.pathname === '/api/health') return json(response, { ok: true, service: 'supportflow-web', status: 'operational', llm: Boolean(process.env.MANUS_API_URL && process.env.MANUS_API_KEY), auth: Boolean(process.env.MANUS_OAUTH_API_URL && process.env.MANUS_JWT_SECRET), database: await databaseReady(), whatsapp: whatsappConfigured() })
+  if (method === 'GET' && url.pathname === '/api/auth/session') {
+    const identity = cookies[SESSION_COOKIE] ? verifyJwt(cookies[SESSION_COOKIE]) : null
+    if (!identity) return json(response, { authenticated: false }, 401)
+    return json(response, { authenticated: true, user: identity })
+  }
+  if (method === 'GET' && url.pathname === '/api/auth/providers') {
+    return json(response, { email: true, google: googleConfigured(), manus: Boolean(process.env.MANUS_OAUTH_API_URL && process.env.MANUS_JWT_SECRET) })
+  }
+  if (method === 'POST' && url.pathname === '/api/auth/register') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { name?: string; email?: string; password?: string }
+      if (!body.email || !body.password) return json(response, { error: 'Email dan password wajib diisi' }, 400)
+      const identity = await registerWithEmailAndPassword({ name: body.name ?? '', email: body.email, password: body.password })
+      setCookies(response, [cookie(SESSION_COOKIE, signSessionJwt(identity), 'Path=/; Max-Age=604800; HttpOnly; SameSite=None; Secure')])
+      return json(response, { authenticated: true, user: identity })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Registrasi gagal' }, 400)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/auth/login') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { email?: string; password?: string }
+      if (!body.email || !body.password) return json(response, { error: 'Email dan password wajib diisi' }, 400)
+      const identity = await loginWithEmailAndPassword({ email: body.email, password: body.password })
+      setCookies(response, [cookie(SESSION_COOKIE, signSessionJwt(identity), 'Path=/; Max-Age=604800; HttpOnly; SameSite=None; Secure')])
+      return json(response, { authenticated: true, user: identity })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Login gagal' }, 400)
+    }
+  }
+  if (method === 'GET' && url.pathname === '/api/auth/google/start') {
+    if (!googleConfigured()) return json(response, { error: 'Login Google belum dikonfigurasi' }, 503)
+    try {
+      const redirectUri = url.searchParams.get('redirectUri') ?? `${url.protocol}//${url.host}/api/auth/google/callback`
+      const nonce = randomBytes(24).toString('base64url')
+      setCookies(response, [cookie('google_oauth_nonce', nonce, 'Path=/; Max-Age=600; HttpOnly; SameSite=None; Secure')])
+      const state = encodeBase64Url(JSON.stringify({ nonce, redirectUri }))
+      response.statusCode = 302
+      response.setHeader('location', googleAuthUrl(redirectUri, state))
+      return response.end()
+    } catch {
+      return json(response, { error: 'Gagal memulai login Google' }, 400)
+    }
+  }
+  if (method === 'GET' && url.pathname === '/api/auth/google/callback') {
+    const code = url.searchParams.get('code') ?? ''
+    const stateValue = url.searchParams.get('state') ?? ''
+    try {
+      const state = JSON.parse(decodeBase64Url(stateValue)) as { nonce?: string; redirectUri?: string }
+      if (!code || !state.nonce || state.nonce !== cookies['google_oauth_nonce']) throw new Error('State Google tidak valid')
+      const redirectUri = state.redirectUri ?? `${url.protocol}//${url.host}/api/auth/google/callback`
+      const identity = await exchangeGoogleCode(code, redirectUri)
+      setCookies(response, [cookie(SESSION_COOKIE, signSessionJwt(identity), 'Path=/; Max-Age=604800; HttpOnly; SameSite=None; Secure'), clearCookie('google_oauth_nonce')])
+      response.statusCode = 302
+      response.setHeader('location', '/app')
+      return response.end()
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Login Google gagal' }, 401)
+    }
+  }
+  if (method === 'GET' && url.pathname === '/api/auth/start') {
+    try { return authStart(response, url.searchParams.get('redirectUri') ?? '') } catch { return json(response, { error: 'Invalid OAuth redirect URI' }, 400) }
+  }
+  if (method === 'GET' && url.pathname === '/manus-oauth/callback') {
+    const stateValue = url.searchParams.get('state') ?? ''
+    const code = url.searchParams.get('code') ?? ''
+    try {
+      const state = JSON.parse(decodeBase64Url(stateValue)) as { redirectUri?: string; nonce?: string }
+      if (!code || !state.redirectUri || !state.nonce || state.nonce !== cookies[NONCE_COOKIE]) throw new Error('OAuth state validation failed')
+      const identity = await exchangeOAuthCode(code, state.redirectUri)
+      setCookies(response, [cookie(SESSION_COOKIE, signJwt(identity), 'Path=/; Max-Age=604800; HttpOnly; SameSite=None; Secure'), clearCookie(NONCE_COOKIE)])
+      response.statusCode = 302
+      response.setHeader('location', '/app')
+      return response.end()
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'OAuth callback failed' }, 401)
+    }
+  }
+  if (method === 'GET' && url.pathname === '/manus-oauth/logout') {
+    setCookies(response, [clearCookie(SESSION_COOKIE), clearCookie(NONCE_COOKIE)])
+    response.statusCode = 302
+    response.setHeader('location', '/')
+    return response.end()
+  }
+
+  if (method === 'GET' && url.pathname === '/api/conversations') {
+    try {
+      const db = await ensureDatabase()
+      const statusRows = await db.execute('SELECT conversation_id, status, reason, updated_at FROM conversation_status')
+      const statusMap = new Map(statusRows.rows.map((row) => [String(row.conversation_id), { status: String(row.status), reason: String(row.reason ?? ''), updatedAt: String(row.updated_at) }]))
+      const conversationRows = await db.execute('SELECT id, workspace_id, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 100')
+      const data = conversationRows.rows.map((row) => {
+        const conversationId = String(row.id)
+        const tracked = statusMap.get(conversationId)
+        return { id: conversationId, workspaceId: String(row.workspace_id), createdAt: String(row.created_at), updatedAt: String(row.updated_at), status: tracked?.status ?? 'AI', handoffReason: tracked?.reason ?? '' }
+      })
+      return json(response, { data, meta: { tenant: 'northstar-goods', status: 'AI | HUMAN_HANDOFF | RESOLVED' } })
+    } catch {
+      return json(response, { data: [], meta: { tenant: 'northstar-goods', status: 'AI | HUMAN_HANDOFF | RESOLVED' } })
+    }
+  }
+  if (method === 'GET' && url.pathname === '/api/chat/public/history') {
+    try {
+      const conversationId = url.searchParams.get('conversationId') ?? WIDGET_CONVERSATION_ID
+      return json(response, { conversationId, messages: await loadHistory(conversationId), persistence: 'turso' })
+    } catch {
+      return json(response, { conversationId: url.searchParams.get('conversationId') ?? WIDGET_CONVERSATION_ID, messages: [], persistence: 'unavailable' }, 503)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/channels/whatsapp/send') {
+    const identity = cookies[SESSION_COOKIE] ? verifyJwt(cookies[SESSION_COOKIE]) : null
+    if (!identity) return json(response, { error: 'Authentication required' }, 401)
+    try {
+      const body = JSON.parse(await readBody(request)) as { to?: string; text?: string }
+      if (!body.to || !body.text || body.text.length > 4096) return json(response, { error: 'to and text are required; text must be 4096 characters or fewer' }, 400)
+      const messageId = await sendWhatsAppText(body.to, body.text)
+      return json(response, { ok: true, channel: 'WHATSAPP', messageId, sentBy: identity.openId })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'WhatsApp send failed' }, 502)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/chat/public') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { messages?: ChatMessage[]; conversationId?: string }
+      const messages = Array.isArray(body.messages) ? body.messages.filter((message) => message && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string').slice(-12) : []
+      if (!messages.length || messages[messages.length - 1]?.role !== 'user') return json(response, { error: 'A user message is required' }, 400)
+      const conversationId = body.conversationId ?? WIDGET_CONVERSATION_ID
+      const current = await getConversationStatus(conversationId).catch(() => null)
+      let persistence = 'unavailable'
+      try { await persistMessage(conversationId, messages[messages.length - 1]); persistence = 'turso' } catch { /* keep AI response available if persistence is temporarily unavailable */ }
+      if (current?.status === 'HUMAN_HANDOFF') {
+        return json(response, { id: `msg_${Date.now()}`, status: 'HUMAN_HANDOFF', confidence: 1, citations: [], conversationId, persistence, message: HANDOFF_ACKNOWLEDGEMENT })
+      }
+      const latestUserText = messages[messages.length - 1].content
+      const userRequestedHuman = isEscalationRequest(latestUserText)
+      let message: string
+      let conversationStatus: 'AI_ACTIVE' | 'HUMAN_HANDOFF' = 'AI_ACTIVE'
+      if (userRequestedHuman) {
+        message = HANDOFF_ACKNOWLEDGEMENT
+        conversationStatus = 'HUMAN_HANDOFF'
+      } else {
+        try {
+          message = await callLiveLlm(messages)
+        } catch {
+          const kb = answerFromKnowledgeBase(latestUserText)
+          if (!kb) {
+            message = OUT_OF_SCOPE_HANDOFF
+            conversationStatus = 'HUMAN_HANDOFF'
+          } else {
+            message = kb
+          }
+        }
+        if (message.includes(HANDOFF_MARKER)) {
+          message = HANDOFF_ACKNOWLEDGEMENT
+          conversationStatus = 'HUMAN_HANDOFF'
+        }
+      }
+      if (conversationStatus === 'HUMAN_HANDOFF') {
+        try { await setConversationStatus(conversationId, 'HUMAN_HANDOFF', latestUserText.slice(0, 300)) } catch { /* status tracking is best-effort */ }
+      }
+      try { await persistMessage(conversationId, { role: 'assistant', content: message }); persistence = 'turso' } catch { /* keep the response available */ }
+      return json(response, { id: `msg_${Date.now()}`, status: conversationStatus, confidence: conversationStatus === 'HUMAN_HANDOFF' ? 1 : 0.9, citations: conversationStatus === 'HUMAN_HANDOFF' ? [] : ['Knowledge Base resmi'], conversationId, persistence, message })
+    } catch (error) {
+      return json(response, { error: 'AI response unavailable', detail: error instanceof Error ? error.message : 'Unknown error' }, 502)
+    }
+  }
+  if (method === 'GET' && (url.pathname === '/api/webhooks/meta' || url.pathname === '/api/webhooks/whatsapp')) {
+    const mode = url.searchParams.get('hub.mode')
+    const token = url.searchParams.get('hub.verify_token')
+    const challenge = url.searchParams.get('hub.challenge')
+    if (!process.env.WHATSAPP_VERIFY_TOKEN) return json(response, { error: 'WhatsApp webhook is not configured' }, 503)
+    if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) { response.statusCode = 200; response.setHeader('content-type', 'text/plain'); return response.end(challenge ?? '') }
+    return json(response, { error: 'Webhook verification failed' }, 403)
+  }
+  if (method === 'POST' && (url.pathname === '/api/webhooks/meta' || url.pathname === '/api/webhooks/whatsapp')) {
+    try {
+      const rawBody = await readRawBody(request)
+      const signature = typeof request.headers['x-hub-signature-256'] === 'string' ? request.headers['x-hub-signature-256'] : undefined
+      if (!verifyMetaSignature(rawBody, signature)) return json(response, { error: 'Invalid Meta webhook signature' }, 401)
+      const result = await handleWhatsAppWebhook(rawBody)
+      return json(response, { accepted: true, normalized: true, channel: 'WHATSAPP', ...result }, 200)
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Webhook processing failed' }, 400)
+    }
+  }
+  return json(response, { error: 'Not found' }, 404)
+}

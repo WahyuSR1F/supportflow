@@ -1,0 +1,15 @@
+{
+  "routes": [
+    { "path": "/", "title": "SupportFlow landing page" },
+    { "path": "/login", "title": "Log in to SupportFlow" },
+    { "path": "/register", "title": "Create a SupportFlow account" },
+    { "path": "/manus-oauth/callback", "title": "SupportFlow authentication callback" },
+    { "path": "/app", "title": "SupportFlow inbox" },
+    { "path": "/app/knowledge", "title": "SupportFlow knowledge base" },
+    { "path": "/app/widget", "title": "SupportFlow chat widget" },
+    { "path": "/app/analytics", "title": "SupportFlow analytics" },
+    { "path": "/knowledge", "title": "SupportFlow knowledge base" },
+    { "path": "/widget", "title": "SupportFlow chat widget" },
+    { "path": "/analytics", "title": "SupportFlow analytics" }
+  ]
+}

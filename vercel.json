@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api?sfpath=/api/:path*" },
+    { "source": "/manus-oauth/:path*", "destination": "/api?sfpath=/manus-oauth/:path*" },
+    { "source": "/:path((?!api/).*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/index.ts": { "maxDuration": 30 }
+  }
+}

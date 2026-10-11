@@ -7,3 +7,6 @@ supportflow.zip
 tsconfig.tsbuildinfo
 tsconfig.node.tsbuildinfo
 .DS_Store
+
+.vercel
+.env*

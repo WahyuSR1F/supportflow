@@ -27,7 +27,7 @@ const json = (response: ServerResponse, payload: Json, status = 200) => {
 
 const setCookies = (response: ServerResponse, cookies: string[]) => response.setHeader('set-cookie', cookies)
 const cookie = (name: string, value: string, options: string) => `${name}=${value}; ${options}`
-const clearCookie = (name: string) => cookie(name, '', 'Path=/; Max-Age=0; HttpOnly; SameSite=None; Secure')
+const clearCookie = (name: string) => cookie(name, '', 'Path=/; Max-Age=0; HttpOnly; SameSite=Lax')
 const parseCookies = (request: IncomingMessage) => Object.fromEntries((request.headers.cookie ?? '').split(';').map((part) => part.trim().split('=')).filter(([name, value]) => name && value).map(([name, ...value]) => [name, value.join('=')]))
 const encodeBase64Url = (value: string | Buffer) => Buffer.from(value).toString('base64url')
 const decodeBase64Url = (value: string) => Buffer.from(value, 'base64url').toString('utf8')
@@ -164,7 +164,7 @@ const verifyJwt = (token: string): AuthIdentity | null => {
     const expected = createHmac('sha256', process.env.MANUS_JWT_SECRET).update(`${encodedHeader}.${encodedPayload}`).digest()
     const received = Buffer.from(encodedSignature, 'base64url')
     if (header.alg !== 'HS256' || received.length !== expected.length || !timingSafeEqual(received, expected)) return null
-    if (payload.appId !== process.env.MANUS_PROJECT_ID || !payload.openId || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
+    if (payload.appId !== (process.env.MANUS_PROJECT_ID ?? 'supportflow') || !payload.openId || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null
     return { openId: payload.openId, name: payload.name, email: payload.email }
   } catch {
     return null

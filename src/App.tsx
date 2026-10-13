@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleHelp,
   Clock3,
@@ -236,6 +237,7 @@ function DashboardApp() {
   const path = window.location.pathname
   const initialNav: NavItem = path.includes('knowledge') ? 'Knowledge base' : path.includes('widget') ? 'Widget' : path.includes('analytics') ? 'Analytics' : 'Inbox'
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav)
+  const [collapsed, setCollapsed] = useState(false)
   const [conversations, setConversations] = useState(initialConversations)
   const [documents, setDocuments] = useState(initialDocuments)
   const [selectedId, setSelectedId] = useState('mira')
@@ -287,11 +289,12 @@ function DashboardApp() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}`}>
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true"><span /><span /><i /></div>
           <div><div className="brand-name">SupportFlow</div><div className="brand-subtitle">AI support operations</div></div>
+          <button className="collapse-toggle" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed((value) => !value)}>{collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}</button>
         </div>
 
         <div className="workspace-switcher">
@@ -327,17 +330,10 @@ function DashboardApp() {
         <div className="page-wrap">
           <div className="page-heading">
             <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav === 'Inbox' ? 'Inbox' : activeNav}</h1><p>{activeNav === 'Inbox' ? 'Stay ahead of every customer conversation.' : activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : 'See how your support system is performing.'}</p></div>
-            <div className="heading-actions"><button className="button button-secondary" onClick={() => setWidgetOpen(true)}><PanelRight size={16} /> Preview widget</button><button className="button button-primary" onClick={() => activeNav === 'Knowledge base' ? addDocument() : setToast('New conversation flow started')}><Plus size={16} /> {activeNav === 'Knowledge base' ? 'Add document' : 'New conversation'}</button></div>
+            <div className="heading-actions"><button className="button button-secondary" onClick={() => setWidgetOpen(true)}><PanelRight size={16} /> Preview widget</button>{activeNav === 'Knowledge base' && <button className="button button-primary" onClick={addDocument}><Plus size={16} /> Add document</button>}</div>
           </div>
 
-          <div className="metric-row">
-            <MetricCard label="Open conversations" value="128" trend="+14.8%" trendLabel="vs last week" icon={<Inbox size={16} />} tone="blue" />
-            <MetricCard label="AI resolution rate" value="72.4%" trend="+6.2%" trendLabel="vs last week" icon={<Sparkles size={16} />} tone="mint" />
-            <MetricCard label="Avg. first response" value="38s" trend="−12s" trendLabel="faster this week" icon={<Clock3 size={16} />} tone="orange" />
-            <MetricCard label="Needs attention" value="12" trend="4 urgent" trendLabel="right now" icon={<AlertTriangle size={16} />} tone="lilac" />
-          </div>
-
-          {activeNav === 'Inbox' && <InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} />}
+          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} /></div>}
           {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
           {activeNav === 'Widget' && <WidgetView widgetOpen={widgetOpen} setWidgetOpen={setWidgetOpen} setToast={setToast} />}
           {activeNav === 'Analytics' && <AnalyticsView />}
@@ -351,28 +347,31 @@ function DashboardApp() {
 }
 
 function NavButton({ icon, label, active, count, onClick }: { icon: React.ReactNode; label: string; active?: boolean; count?: string; onClick: () => void }) {
-  return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span>{count && <em>{count}</em>}</button>
+  return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span>{count && <em>{count}</em>}<span className="nav-tooltip" aria-hidden="true">{label}</span></button>
 }
 
 function MetricCard({ label, value, trend, trendLabel, icon, tone }: { label: string; value: string; trend: string; trendLabel: string; icon: React.ReactNode; tone: string }) {
   return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small><b className={tone === 'orange' || tone === 'lilac' ? 'neutral-trend' : ''}>{trend}</b> {trendLabel}</small></div><ArrowUpRight className="metric-arrow" size={15} /></div>
 }
 
-function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus }: { selected: Conversation; conversations: Conversation[]; selectedId: string; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: () => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void }) {
+function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast }: { selected: Conversation; conversations: Conversation[]; selectedId: string; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: () => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void }) {
   return <div className="inbox-layout">
     <section className="conversation-panel panel">
-      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><button className="icon-button subtle" aria-label="Filter conversations"><SlidersHorizontal size={17} /></button></div>
+      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><div className="panel-heading-actions"><button className="button button-primary small" onClick={() => setToast('New conversation flow started')}><Plus size={14} /> New</button><button className="icon-button subtle" aria-label="Filter conversations"><SlidersHorizontal size={17} /></button></div></div>
       <div className="search-field"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" /><kbd>⌘ K</kbd></div>
       <div className="filter-row"><FilterChip label="All" active={filter === 'All'} count="128" onClick={() => setFilter('All')} /><FilterChip label="Needs handoff" active={filter === 'Needs handoff'} count="12" onClick={() => setFilter('Needs handoff')} /><FilterChip label="Unread" active={false} count="6" onClick={() => setFilter('All')} /></div>
-      <div className="conversation-list">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => setSelectedId(conversation.id)} />)}{conversations.length === 0 && <div className="empty-state"><Search size={24} /><strong>No conversations found</strong><span>Try a different search or filter.</span></div>}</div>
+      <div className="conversation-list">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => { setSelectedId(conversation.id); window.history.pushState({}, '', `/app/inbox/${conversation.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />)}{conversations.length === 0 && <div className="empty-state"><Search size={24} /><strong>No conversations found</strong><span>Try a different search or filter.</span></div>}</div>
       <div className="list-footer"><span>Showing {conversations.length} of 128</span><button>View all <ArrowUpRight size={13} /></button></div>
     </section>
 
     <section className="thread-panel panel">
-      <div className="thread-header"><div className="contact-summary"><Avatar conversation={selected} size="lg" /><div><div className="contact-name-row"><h2>{selected.name}</h2><span className="verified-mark"><Check size={11} /></span></div><div className="contact-meta"><ChannelIcon channel={selected.channel} small /> <span>{selected.channel}</span><i /> <span>{selected.location}</span></div></div></div><div className="thread-actions"><StatusBadge status={selected.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
-      {selected.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>Confidence dropped below 70% for this answer. An agent should review before sending.</span></div><button onClick={() => updateSelectedStatus('Agent controlled', 'You took over the conversation')}>Take over <ArrowUpRight size={14} /></button></div>}
+      <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={selected} size="lg" /><div><div className="contact-name-row"><h2>{selected.name}</h2></div><div className="contact-meta"><ChannelIcon channel={selected.channel} small /> <span>{selected.channel}</span><i /> <span>{selected.location}</span></div></div></div><div className="thread-actions"><StatusBadge status={selected.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
+      {selected.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button onClick={() => updateSelectedStatus('Agent controlled', 'You took over the conversation')}>Take over <ArrowUpRight size={14} /></button></div>}
       <div className="thread-body"><div className="date-divider"><span>Today</span></div>{selected.messages.map((message, index) => <MessageBubble key={`${selected.id}-${index}`} message={message} conversation={selected} />)}<TypingIndicator /></div>
-      <div className="reply-assistant"><div className="assistant-title"><div className="assistant-label"><div className="sparkle-icon"><Sparkles size={15} /></div><strong>AI suggested reply</strong><span>grounded in 3 sources</span></div><div className="confidence-chip"><span>Confidence</span><strong>{selected.confidence}%</strong></div></div><p>{selected.id === 'mira' ? 'I can help with that. Address changes may be possible before your order ships. Let me check the order status and I’ll confirm the next step for you.' : selected.id === 'noah' ? 'I’m checking the payment authorizations now. I’ll confirm whether one of the charges is only a temporary hold and update you shortly.' : 'Here’s a clear answer based on the latest support policy. I can also connect you with a specialist if you need help with anything else.'}</p><div className="source-row"><span><FileText size={13} /> Shipping & delivery policy</span><span><FileCheck2 size={13} /> Order support playbook</span><button aria-label="Refresh suggestion"><RefreshCw size={14} /></button></div><div className="assistant-actions"><button className="button button-primary small" onClick={() => setComposer(selected.id === 'mira' ? 'I can help with that. Address changes may be possible before your order ships. Let me check the order status and I’ll confirm the next step for you.' : 'I’m checking the payment authorizations now. I’ll confirm the next step and update you shortly.')}><Sparkles size={14} /> Use reply</button><button className="button button-ghost small" onClick={() => setComposer('')}>Edit response</button></div></div>
+      <div className="reply-assistant"><div className="assistant-title"><div className="assistant-label"><div className="sparkle-icon"><Sparkles size={15} /></div><strong>AI suggested reply</strong></div><button className="button button-ghost small" onClick={() => setComposer('')}>Edit response</button></div>
+        <p>{selected.id === 'mira' ? 'I can help with that. Address changes may be possible before your order ships. Let me check the order status and I’ll confirm the next step for you.' : selected.id === 'noah' ? 'I’m checking the payment authorizations now. I’ll confirm whether one of the charges is only a temporary hold and update you shortly.' : 'Here’s a clear answer based on the latest support policy. I can also connect you with a specialist if you need help with anything else.'}</p>
+        <div className="assistant-actions"><button className="button button-primary small" onClick={() => setComposer(selected.id === 'mira' ? 'I can help with that. Address changes may be possible before your order ships. Let me check the order status and I’ll confirm the next step for you.' : 'I’m checking the payment authorizations now. I’ll confirm the next step and update you shortly.')}><Sparkles size={14} /> Use reply</button></div>
+      </div>
       <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {selected.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
     </section>
 
@@ -381,11 +380,27 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
       <div className="customer-card"><Avatar conversation={selected} size="md" /><div><strong>{selected.name}</strong><span>{selected.customerType}</span></div><button className="icon-button subtle" aria-label="Customer actions"><MoreHorizontal size={17} /></button></div>
       <div className="detail-grid"><div><span>Location</span><strong>{selected.location}</strong></div><div><span>First response</span><strong>{selected.firstResponse}</strong></div><div><span>Sentiment</span><strong className={`sentiment ${selected.sentiment.toLowerCase().replaceAll(' ', '-')}`}>{selected.sentiment}</strong></div><div><span>Last seen</span><strong>Just now</strong></div></div>
       <div className="context-section"><div className="section-title"><span>Tags</span><button className="text-button"><Plus size={13} /> Add</button></div><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}><Tag size={11} /> {tag}</span>)}</div></div>
-      <div className="context-section"><div className="section-title"><span>Handoff control</span><span className="live-label"><span className="live-pulse" /> Live</span></div><div className="control-card"><div className="control-line"><div className="control-icon blue"><Bot size={15} /></div><div><strong>AI handling</strong><span>{selected.status === 'Agent controlled' ? 'Paused by agent' : selected.status === 'Resolved' ? 'Thread resolved' : 'Active on this thread'}</span></div><div className={`toggle ${selected.status !== 'Agent controlled' && selected.status !== 'Resolved' ? 'on' : ''}`}><span /></div></div><div className="control-divider" /><div className="control-line"><div className="control-icon orange"><Headphones size={15} /></div><div><strong>Human handoff</strong><span>{selected.status === 'Needs handoff' ? 'Recommended · 62% confidence' : 'Available to team'}</span></div><button className="assign-button" onClick={() => updateSelectedStatus(selected.status === 'Agent controlled' ? 'AI active' : 'Agent controlled', selected.status === 'Agent controlled' ? 'Conversation returned to AI' : 'You took over the conversation')}>{selected.status === 'Agent controlled' ? 'Return to AI' : 'Take over'}</button></div></div></div>
-      <div className="context-section"><div className="section-title"><span>Knowledge used</span><button className="icon-button tiny" aria-label="View knowledge sources"><ArrowUpRight size={14} /></button></div><div className="knowledge-list"><KnowledgeSource label="Shipping & delivery policy" score="0.86" /><KnowledgeSource label="Order support playbook" score="0.78" /><KnowledgeSource label="Customer care handbook" score="0.71" /></div></div>
+      <div className="context-section"><div className="section-title"><span>Handoff control</span><span className="live-label"><span className="live-pulse" /> Live</span></div><div className="control-card"><div className="control-line"><div className="control-icon blue"><Bot size={15} /></div><div><strong>AI handling</strong><span>{selected.status === 'Agent controlled' ? 'Paused by agent' : selected.status === 'Resolved' ? 'Thread resolved' : 'Active on this thread'}</span></div><div className={`toggle ${selected.status !== 'Agent controlled' && selected.status !== 'Resolved' ? 'on' : ''}`}><span /></div></div><div className="control-divider" /><div className="control-line"><div className="control-icon orange"><Headphones size={15} /></div><div><strong>Human handoff</strong><span>{selected.status === 'Needs handoff' ? 'Recommended' : 'Available to team'}</span></div><button className="assign-button" onClick={() => updateSelectedStatus(selected.status === 'Agent controlled' ? 'AI active' : 'Agent controlled', selected.status === 'Agent controlled' ? 'Conversation returned to AI' : 'You took over the conversation')}>{selected.status === 'Agent controlled' ? 'Return to AI' : 'Take over'}</button></div></div></div>
       <div className="context-footer"><ShieldCheck size={15} /><span>AI replies are restricted to approved workspace sources.</span></div>
     </aside>
   </div>
+}
+
+function ConversationPage({ path }: { path: string }) {
+  const id = decodeURIComponent(path.split('/app/inbox/')[1] ?? 'mira')
+  const conversation = initialConversations.find((item) => item.id === id) ?? initialConversations[0]
+  const [composer, setComposer] = useState('')
+  const sendMessage = () => setComposer('')
+  return (
+    <div className="conversation-page">
+      <div className="thread-panel panel">
+        <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div><div className="contact-meta"><ChannelIcon channel={conversation.channel} small /> <span>{conversation.channel}</span><i /> <span>{conversation.location}</span></div></div></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
+        {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={() => undefined}>Take over <ArrowUpRight size={14} /></button></div>}
+        <div className="thread-body"><div className="date-divider"><span>Today</span></div>{conversation.messages.map((message, index) => <MessageBubble key={`${conversation.id}-${index}`} message={message} conversation={conversation} />)}<TypingIndicator /></div>
+        <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
+      </div>
+    </div>
+  )
 }
 
 function FilterChip({ label, active, count, onClick }: { label: string; active: boolean; count: string; onClick: () => void }) {
@@ -497,6 +512,7 @@ function MonitorDot() { return <span className="monitor-dot" /> }
 function App() {
   const path = window.location.pathname
   const isCallbackRoute = path === '/manus-oauth/callback' || path === '/auth/callback'
+  const isConversationRoute = /^\/app\/inbox\/.+/.test(path)
   const isPrivateRoute = path.startsWith('/app') || path === '/knowledge' || path === '/widget' || path === '/analytics'
   const [session, setSession] = useState<'loading' | 'authenticated' | 'anonymous'>('loading')
 
@@ -517,6 +533,7 @@ function App() {
   if (path === '/register') return <AuthPage mode="register" />
   if (!isPrivateRoute) return <LandingPage />
   if (session === 'loading' || session === 'anonymous') return <div className="auth-callback"><div className="auth-callback-card"><div className="auth-card-icon"><Sparkles size={18} /></div><h1>SupportFlow</h1><p>{session === 'loading' ? 'Checking your workspace session…' : 'Redirecting to secure login…'}</p></div></div>
+  if (isConversationRoute) return <ConversationPage path={path} />
   return <DashboardApp />
 }
 

@@ -328,12 +328,12 @@ function DashboardApp() {
         </header>
 
         <div className="page-wrap">
-          <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav === 'Inbox' ? 'Inbox' : activeNav}</h1><p>{activeNav === 'Inbox' ? 'Stay ahead of every customer conversation.' : activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : 'See how your support system is performing.'}</p></div>
+          {activeNav !== 'Inbox' && <div className="page-heading">
+            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : 'See how your support system is performing.'}</p></div>
             <div className="heading-actions"><button className="button button-secondary" onClick={() => setWidgetOpen(true)}><PanelRight size={16} /> Preview widget</button>{activeNav === 'Knowledge base' && <button className="button button-primary" onClick={addDocument}><Plus size={16} /> Add document</button>}</div>
-          </div>
+          </div>}
 
-          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} /></div>}
+          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} setWidgetOpen={setWidgetOpen} /></div>}
           {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
           {activeNav === 'Widget' && <WidgetView widgetOpen={widgetOpen} setWidgetOpen={setWidgetOpen} setToast={setToast} />}
           {activeNav === 'Analytics' && <AnalyticsView />}
@@ -354,10 +354,10 @@ function MetricCard({ label, value, trend, trendLabel, icon, tone }: { label: st
   return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small><b className={tone === 'orange' || tone === 'lilac' ? 'neutral-trend' : ''}>{trend}</b> {trendLabel}</small></div><ArrowUpRight className="metric-arrow" size={15} /></div>
 }
 
-function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast }: { selected: Conversation; conversations: Conversation[]; selectedId: string; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: () => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void }) {
+function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, setWidgetOpen }: { selected: Conversation; conversations: Conversation[]; selectedId: string; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: () => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; setWidgetOpen: (value: boolean) => void }) {
   return <div className="inbox-layout">
     <section className="conversation-panel panel">
-      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><div className="panel-heading-actions"><button className="button button-primary small" onClick={() => setToast('New conversation flow started')}><Plus size={14} /> New</button><button className="icon-button subtle" aria-label="Filter conversations"><SlidersHorizontal size={17} /></button></div></div>
+      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><div className="panel-heading-actions"><button className="button button-secondary small" onClick={() => setWidgetOpen(true)}><PanelRight size={14} /> Preview</button><button className="button button-primary small" onClick={() => setToast('New conversation flow started')}><Plus size={14} /> New</button><button className="icon-button subtle" aria-label="Filter conversations"><SlidersHorizontal size={17} /></button></div></div>
       <div className="search-field"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" /><kbd>⌘ K</kbd></div>
       <div className="filter-row"><FilterChip label="All" active={filter === 'All'} count="128" onClick={() => setFilter('All')} /><FilterChip label="Needs handoff" active={filter === 'Needs handoff'} count="12" onClick={() => setFilter('Needs handoff')} /><FilterChip label="Unread" active={false} count="6" onClick={() => setFilter('All')} /></div>
       <div className="conversation-list">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => { setSelectedId(conversation.id); window.history.pushState({}, '', `/app/inbox/${conversation.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />)}{conversations.length === 0 && <div className="empty-state"><Search size={24} /><strong>No conversations found</strong><span>Try a different search or filter.</span></div>}</div>
@@ -365,7 +365,7 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
     </section>
 
     <section className="thread-panel panel">
-      <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={selected} size="lg" /><div><div className="contact-name-row"><h2>{selected.name}</h2></div><div className="contact-meta"><ChannelIcon channel={selected.channel} small /> <span>{selected.channel}</span><i /> <span>{selected.location}</span></div></div></div><div className="thread-actions"><StatusBadge status={selected.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
+      <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={selected} size="lg" /><div><div className="contact-name-row"><h2>{selected.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={selected.channel} small /> {selected.channel}</span><span className="contact-location">{selected.location}</span></div><div className="thread-actions"><StatusBadge status={selected.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
       {selected.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button onClick={() => updateSelectedStatus('Agent controlled', 'You took over the conversation')}>Take over <ArrowUpRight size={14} /></button></div>}
       <div className="thread-body"><div className="date-divider"><span>Today</span></div>{selected.messages.map((message, index) => <MessageBubble key={`${selected.id}-${index}`} message={message} conversation={selected} />)}<TypingIndicator /></div>
       <div className="reply-assistant"><div className="assistant-title"><div className="assistant-label"><div className="sparkle-icon"><Sparkles size={15} /></div><strong>AI suggested reply</strong></div><button className="button button-ghost small" onClick={() => setComposer('')}>Edit response</button></div>
@@ -388,17 +388,41 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
 
 function ConversationPage({ path }: { path: string }) {
   const id = decodeURIComponent(path.split('/app/inbox/')[1] ?? 'mira')
-  const conversation = initialConversations.find((item) => item.id === id) ?? initialConversations[0]
+  const [conversations, setConversations] = useState(initialConversations)
+  const conversation = conversations.find((item) => item.id === id) ?? conversations[0]
   const [composer, setComposer] = useState('')
-  const sendMessage = () => setComposer('')
+  const [toast, setToast] = useState('')
+
+  const sendMessage = () => {
+    if (!composer.trim()) return
+    const text = composer.trim()
+    setConversations((current) => current.map((item) => item.id === conversation.id ? {
+      ...item,
+      status: 'Agent controlled' as ConversationStatus,
+      preview: text,
+      time: 'now',
+      messages: [...item.messages, { from: 'agent' as const, text, time: '09:48' }],
+    } : item))
+    setComposer('')
+    setToast('Reply sent · AI paused for this thread')
+    window.setTimeout(() => setToast(''), 2400)
+  }
+
+  const takeOver = () => {
+    setConversations((current) => current.map((item) => item.id === conversation.id ? { ...item, status: 'Agent controlled' as ConversationStatus } : item))
+    setToast('You took over the conversation')
+    window.setTimeout(() => setToast(''), 2400)
+  }
+
   return (
     <div className="conversation-page">
       <div className="thread-panel panel">
-        <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div><div className="contact-meta"><ChannelIcon channel={conversation.channel} small /> <span>{conversation.channel}</span><i /> <span>{conversation.location}</span></div></div></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
-        {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={() => undefined}>Take over <ArrowUpRight size={14} /></button></div>}
+        <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><span className="contact-location">{conversation.location}</span></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
+        {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={takeOver}>Take over <ArrowUpRight size={14} /></button></div>}
         <div className="thread-body"><div className="date-divider"><span>Today</span></div>{conversation.messages.map((message, index) => <MessageBubble key={`${conversation.id}-${index}`} message={message} conversation={conversation} />)}<TypingIndicator /></div>
         <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
       </div>
+      {toast && <div className="toast"><CheckCircle2 size={17} /> {toast}</div>}
     </div>
   )
 }

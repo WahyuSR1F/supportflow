@@ -15,7 +15,7 @@ const json = (response, payload, status = 200) => {
 };
 const setCookies = (response, cookies) => response.setHeader('set-cookie', cookies);
 const cookie = (name, value, options) => `${name}=${value}; ${options}`;
-const clearCookie = (name) => cookie(name, '', 'Path=/; Max-Age=0; HttpOnly; SameSite=None; Secure');
+const clearCookie = (name) => cookie(name, '', 'Path=/; Max-Age=0; HttpOnly; SameSite=Lax');
 const parseCookies = (request) => Object.fromEntries((request.headers.cookie ?? '').split(';').map((part) => part.trim().split('=')).filter(([name, value]) => name && value).map(([name, ...value]) => [name, value.join('=')]));
 const encodeBase64Url = (value) => Buffer.from(value).toString('base64url');
 const decodeBase64Url = (value) => Buffer.from(value, 'base64url').toString('utf8');
@@ -151,7 +151,7 @@ const verifyJwt = (token) => {
         const received = Buffer.from(encodedSignature, 'base64url');
         if (header.alg !== 'HS256' || received.length !== expected.length || !timingSafeEqual(received, expected))
             return null;
-        if (payload.appId !== process.env.MANUS_PROJECT_ID || !payload.openId || !payload.exp || payload.exp < Math.floor(Date.now() / 1000))
+        if (payload.appId !== (process.env.MANUS_PROJECT_ID ?? 'supportflow') || !payload.openId || !payload.exp || payload.exp < Math.floor(Date.now() / 1000))
             return null;
         return { openId: payload.openId, name: payload.name, email: payload.email };
     }

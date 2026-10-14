@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm build",
+  "buildCommand": "VITE_CONFIG_NATIVE_IGNORE_WARNING=true pnpm build",
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api?sfpath=/api/:path*" },

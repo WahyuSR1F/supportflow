@@ -69,6 +69,7 @@ type Message = {
   from: MessageKind
   text: string
   time: string
+  image?: string
 }
 
 type WidgetChatMessage = {
@@ -428,14 +429,15 @@ function DashboardApp() {
     window.setTimeout(() => setToast(''), 2400)
   }
 
-  const sendMessage = () => {
-    if (!composer.trim()) return
+  const sendMessage = (image?: string) => {
+    if (!composer.trim() && !image) return
+    const text = composer.trim()
     setConversations((current) => current.map((conversation) => conversation.id === selected?.id ? {
       ...conversation,
       status: 'Agent controlled',
-      preview: composer.trim(),
+      preview: text || 'Image attachment',
       time: 'now',
-      messages: [...conversation.messages, { from: 'agent', text: composer.trim(), time: '09:48' }],
+      messages: [...conversation.messages, { from: 'agent', text, time: '09:48', ...(image ? { image } : {}) }],
     } : conversation))
     setComposer('')
     setToast('Reply sent · AI paused for this thread')
@@ -526,9 +528,31 @@ function MetricCard({ label, value, trend, trendLabel, icon, tone }: { label: st
   return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small><b className={tone === 'orange' || tone === 'lilac' ? 'neutral-trend' : ''}>{trend}</b> {trendLabel}</small></div><ArrowUpRight className="metric-arrow" size={15} /></div>
 }
 
-function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, setWidgetOpen, onNewConversation, agents, autoFallback, activeAgent, onAssignAgent, onRegenerate, regenerating, onManageAgents }: { selected: Conversation | null; conversations: Conversation[]; selectedId: string | null; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: () => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; setWidgetOpen: (value: boolean) => void; onNewConversation?: () => void; agents: AiAgent[]; autoFallback: boolean; activeAgent: AiAgent | null; onAssignAgent: (agentId: string) => void; onRegenerate: () => void; regenerating: boolean; onManageAgents: () => void }) {
+function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, setWidgetOpen, onNewConversation, agents, autoFallback, activeAgent, onAssignAgent, onRegenerate, regenerating, onManageAgents }: { selected: Conversation | null; conversations: Conversation[]; selectedId: string | null; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: (image?: string) => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; setWidgetOpen: (value: boolean) => void; onNewConversation?: () => void; agents: AiAgent[]; autoFallback: boolean; activeAgent: AiAgent | null; onAssignAgent: (agentId: string) => void; onRegenerate: () => void; regenerating: boolean; onManageAgents: () => void }) {
   const [activeThreadDropdown, setActiveThreadDropdown] = useState<string | null>(null)
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  const [attachment, setAttachment] = useState<{ name: string; url: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => { setAttachment(null) }, [selectedId])
+
+  const pickFile = (file: File | undefined) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setToast('Only image attachments are supported'); return }
+    if (file.size > 5 * 1024 * 1024) { setToast('Image must be under 5 MB'); return }
+    const reader = new FileReader()
+    reader.onload = () => setAttachment({ name: file.name, url: String(reader.result) })
+    reader.readAsDataURL(file)
+  }
+
+  const handleSend = () => {
+    if (attachment) {
+      sendMessage(attachment.url)
+      setAttachment(null)
+      return
+    }
+    sendMessage()
+  }
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -593,7 +617,7 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
     </section>
 
     {selected ? <section className="thread-panel panel">
-      <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app') }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={selected!} size="lg" /><div><div className="contact-name-row"><h2>{selected!.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={selected!.channel} small /> {selected!.channel}</span><span className="contact-location">{selected!.location}</span></div><div className="thread-actions"><AgentSelect agents={agents.filter((agent) => agent.enabled)} activeAgent={activeAgent} autoFallback={autoFallback} onAssign={onAssignAgent} onManage={onManageAgents} /><StatusBadge status={selected!.status} onClick={() => {
+      <div className="thread-header"><div className="contact-summary"><Avatar conversation={selected!} size="lg" /><div><div className="contact-name-row"><h2>{selected!.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={selected!.channel} small /> {selected!.channel}</span><span className="contact-location">{selected!.location}</span></div><div className="thread-actions"><AgentSelect agents={agents.filter((agent) => agent.enabled)} activeAgent={activeAgent} autoFallback={autoFallback} onAssign={onAssignAgent} onManage={onManageAgents} /><StatusBadge status={selected!.status} onClick={() => {
             const next = selected!.status === 'AI active' ? 'Needs handoff' : selected!.status === 'Needs handoff' ? 'Agent controlled' : selected!.status === 'Agent controlled' ? 'Resolved' : 'AI active'
             updateSelectedStatus(next, next === 'AI active' ? 'AI activated' : next === 'Needs handoff' ? 'Needs handoff flagged' : next === 'Agent controlled' ? 'You took over the conversation' : 'Conversation resolved')
           }} />
@@ -612,7 +636,7 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
         <p>{selected!.suggestion}</p>
         <div className="assistant-actions"><button className="button button-primary small" onClick={() => setComposer(selected!.suggestion)}><Sparkles size={14} /> Use reply</button><button className="button button-secondary small" onClick={onRegenerate} disabled={regenerating}><RefreshCw size={13} /> {regenerating ? 'Generating…' : 'Regenerate'}</button></div>
       </div>
-      <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {selected!.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'}{activeAgent ? ` · ${activeAgent.name}` : ''} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
+      <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {selected!.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'}{activeAgent ? ` · ${activeAgent.name}` : ''} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) handleSend() }} placeholder="Write a reply…" aria-label="Write a reply" />{attachment && <div className="composer-attachment"><img src={attachment.url} alt={attachment.name} /><span>{attachment.name}</span><button type="button" aria-label="Remove attachment" onClick={() => setAttachment(null)}>×</button></div>}<div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={handleSend}><Send size={15} /> Send reply</button></div><input ref={fileInputRef} type="file" accept="image/*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /></div>
     </section> : <section className="thread-panel panel"><div className="empty-state"><MessageCircle size={42} /><strong style={{ fontSize: '14px' }}>No conversation selected</strong><span style={{ fontSize: '11px' }}>Choose a conversation or click New to start</span></div></section>}
 
     {selected && <aside className="context-panel">
@@ -677,7 +701,7 @@ function ConversationRow({ conversation, active, onClick }: { conversation: Conv
 
 function MessageBubble({ message, conversation }: { message: Message; conversation: Conversation }) {
   const isCustomer = message.from === 'customer'
-  return <div className={`message-row ${isCustomer ? 'customer' : 'outbound'}`}><div className="message-avatar">{isCustomer ? <Avatar conversation={conversation} size="sm" /> : message.from === 'ai' ? <div className="mini-ai"><Bot size={14} /></div> : <div className="mini-agent">AR</div>}</div><div className="message-content"><div className="message-meta"><strong>{isCustomer ? conversation.name : message.from === 'ai' ? 'SupportFlow AI' : 'Ayunda · agent'}</strong><time>{message.time}</time>{message.from === 'ai' && <span className="ai-label"><Sparkles size={11} /> AI</span>}</div><div className={`message-bubble ${isCustomer ? 'customer-bubble' : message.from === 'ai' ? 'ai-bubble' : 'agent-bubble'}`}>{message.text}</div></div></div>
+  return <div className={`message-row ${isCustomer ? 'customer' : 'outbound'}`}><div className="message-avatar">{isCustomer ? <Avatar conversation={conversation} size="sm" /> : message.from === 'ai' ? <div className="mini-ai"><Bot size={14} /></div> : <div className="mini-agent">AR</div>}</div><div className="message-content"><div className="message-meta"><strong>{isCustomer ? conversation.name : message.from === 'ai' ? 'SupportFlow AI' : 'Ayunda · agent'}</strong><time>{message.time}</time>{message.from === 'ai' && <span className="ai-label"><Sparkles size={11} /> AI</span>}</div><div className={`message-bubble ${isCustomer ? 'customer-bubble' : message.from === 'ai' ? 'ai-bubble' : 'agent-bubble'}`}>{message.text}{message.image && <img className="message-image" src={message.image} alt="Attachment" />}</div></div></div>
 }
 
 function TypingIndicator() {

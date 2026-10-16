@@ -851,7 +851,7 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
   return (
     <div className="secondary-layout">
       <div className="section-toolbar">
-        <div><span className="eyebrow compact">ROUTER LAYER</span><h2>AI agent router</h2><p>{enabledDraft.length} enabled of {draft.length} agents · the router fails over to the next agent when quota runs out.</p></div>
+        <div><span className="eyebrow compact">ROUTER LAYER</span><h2>AI agent router</h2><p>{enabledDraft.length} enabled of {draft.length} agents in the fallback chain.</p></div>
         <div className="toolbar-actions"><button className="button button-secondary" onClick={addAgent}><Plus size={15} /> Add agent</button><button className="button button-primary" onClick={() => { onSave(draft, draftFallback); setDirty(false) }} disabled={saving}><Check size={15} /> {saving ? 'Saving…' : dirty ? 'Save settings' : 'Saved'}</button></div>
       </div>
       <div className="knowledge-overview">

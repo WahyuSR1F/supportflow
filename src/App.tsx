@@ -665,19 +665,35 @@ function ConversationPage({ path }: { path: string }) {
   const [conversations, setConversations] = useState(initialConversations)
   const conversation = conversations.find((item) => item.id === id) ?? conversations[0]
   const [composer, setComposer] = useState('')
+  const [attachment, setAttachment] = useState<{ name: string; url: string; type: string } | null>(null)
   const [toast, setToast] = useState('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const sendMessage = () => {
-    if (!composer.trim()) return
+  const pickFile = (file: File | undefined) => {
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) { setToast('File must be under 5 MB'); return }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const url = String(reader.result)
+      const type = file.type.startsWith('image/') ? 'image' : file.type.startsWith('application/') ? 'doc' : 'other'
+      setAttachment(prev => ({ name: file.name, url, type }))
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleSend = () => {
+    if (!composer.trim() && !attachment) return
     const text = composer.trim()
+    const attPreview = attachment?.type === 'image' ? attachment.url : attachment?.name || 'File attachment'
     setConversations((current) => current.map((item) => item.id === conversation.id ? {
       ...item,
       status: 'Agent controlled' as ConversationStatus,
-      preview: text,
+      preview: text || attPreview,
       time: 'now',
-      messages: [...item.messages, { from: 'agent' as const, text, time: '09:48' }],
+      messages: [...item.messages, { from: 'agent' as const, text, time: '09:48', ...(attachment ? { attachment: attachment as Attachment } : {}) }],
     } : item))
     setComposer('')
+    setAttachment(null)
     setToast('Reply sent · AI paused for this thread')
     window.setTimeout(() => setToast(''), 2400)
   }
@@ -694,7 +710,7 @@ function ConversationPage({ path }: { path: string }) {
         <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app') }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><span className="contact-location">{conversation.location}</span></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
         {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={takeOver}>Take over <ArrowUpRight size={14} /></button></div>}
         <div className="thread-body"><div className="date-divider"><span>Today</span></div>{conversation.messages.map((message, index) => <MessageBubble key={`${conversation.id}-${index}`} message={message} conversation={conversation} />)}<TypingIndicator /></div>
-        <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
+        <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) handleSend() }} placeholder="Write a reply…" aria-label="Write a reply" />{attachment && <div className="composer-attachment">{attachment.type === 'image' ? <img src={attachment.url} alt={attachment.name} /> : <span><div className="attachment-icon"><FileText size={16} /></div>{attachment.name}</span>}<button type="button" aria-label="Remove attachment" onClick={() => setAttachment(null)}>×</button></div>}<div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={handleSend}><Send size={15} /> Send reply</button></div><input ref={fileInputRef} type="file" accept="*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /></div>
       </div>
       {toast && <div className="toast"><CheckCircle2 size={17} /> {toast}</div>}
     </div>
@@ -707,11 +723,9 @@ function FilterChip({ label, active, count, onClick }: { label: string; active: 
 
 function ConversationRow({ conversation, active, onClick }: { conversation: Conversation; active: boolean; onClick: () => void }) {
   return <button className={`conversation-row ${active ? 'active' : ''}`} onClick={onClick}><Avatar conversation={conversation} size="sm" /><div className="conversation-row-main"><div className="conversation-topline"><strong>{conversation.name}</strong><time>{conversation.time}</time></div><div className="conversation-preview">{conversation.preview}</div><div className="conversation-bottomline"><span className={`channel-label ${conversation.channel.toLowerCase().replaceAll(' ', '-')}`}><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><StatusBadge status={conversation.status} /></div></div>{conversation.unread > 0 && <span className="unread-count">{conversation.unread}</span>}</button>
-}
-
-function MessageBubble({ message, conversation }: { message: Message; conversation: Conversation }) {
+}function MessageBubble({ message, conversation }: { message: Message; conversation: Conversation }) {
   const isCustomer = message.from === 'customer'
-  const hasAttachment = message.attachment ? message.attachment.type === 'image' : false  return <div className={`message-row ${isCustomer ? 'customer' : 'outbound'}`}><div className="message-avatar">{isCustomer ? <Avatar conversation={conversation} size="sm" /> : message.from === 'ai' ? <div className="mini-ai"><Bot size={14} /></div> : <div className="mini-agent">AR</div>}</div><div className="message-content"><div className="message-meta"><strong>{isCustomer ? conversation.name : message.from === 'ai' ? 'SupportFlow AI' : 'Ayunda · agent'}</strong><time>{message.time}</time>{message.from === 'ai' && <span className="ai-label"><Sparkles size={11} /> AI</span>}</div><div className={`message-bubble ${isCustomer ? 'customer-bubble' : message.from === 'ai' ? 'ai-bubble' : 'agent-bubble'}`}>{message.text}{message.attachment && <img className="message-image" src={message.attachment.url} alt={message.attachment.name} />}</div></div></div>
+  return <div className={`message-row ${isCustomer ? 'customer' : 'outbound'}`}><div className="message-avatar">{isCustomer ? <Avatar conversation={conversation} size="sm" /> : message.from === 'ai' ? <div className="mini-ai"><Bot size={14} /></div> : <div className="mini-agent">AR</div>}</div><div className="message-content"><div className="message-meta"><strong>{isCustomer ? conversation.name : message.from === 'ai' ? 'SupportFlow AI' : 'Ayunda · agent'}</strong><time>{message.time}</time>{message.from === 'ai' && <span className="ai-label"><Sparkles size={11} /> AI</span>}</div><div className={`message-bubble ${isCustomer ? 'customer-bubble' : message.from === 'ai' ? 'ai-bubble' : 'agent-bubble'}`}>{message.text}{message.attachment ? (message.attachment.type === 'image' ? <img className="message-image" src={message.attachment.url} alt={message.attachment.name} /> : <div className="attachment-line"><div className="message-attachment-icon"><FileText size={16} /></div><span>{message.attachment.name}</span></div>) : null}</div></div></div>
 }
 
 function TypingIndicator() {

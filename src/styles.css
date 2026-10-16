@@ -201,6 +201,9 @@ h1 { font-size: 26px; letter-spacing: -1.1px; line-height: 1.1; }
 /* Attachment icon for non-image files */
 .attachment-icon { width: 22px; height: 22px; display: grid; place-items: center; background: #f1f3f1; color: #89938b; border-radius: 6px; margin-right: 6px; vertical-align: middle; }
 
+.message-attachment-icon { width: 22px; height: 22px; display: grid; place-items: center; background: #f1f3f1; color: #89938b; border-radius: 6px; flex: 0 0 auto; vertical-align: middle; }
+.attachment-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 9px; color: #5c655f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+
 /* Public marketing and authentication surfaces */
 .marketing-shell { min-height: 100vh; background: #f6f7f4; color: #191b1d; }
 .marketing-nav { width: min(1180px, calc(100% - 56px)); margin: 0 auto; height: 82px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }

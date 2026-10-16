@@ -198,6 +198,9 @@ h1 { font-size: 26px; letter-spacing: -1.1px; line-height: 1.1; }
 .widget-mini-input input:disabled, .widget-mini-input button:disabled { opacity: .55; cursor: wait; }
 @keyframes supportflow-bounce { 0%, 80%, 100% { transform: translateY(0); opacity: .5; } 40% { transform: translateY(-3px); opacity: 1; } }
 
+/* Attachment icon for non-image files */
+.attachment-icon { width: 22px; height: 22px; display: grid; place-items: center; background: #f1f3f1; color: #89938b; border-radius: 6px; margin-right: 6px; vertical-align: middle; }
+
 /* Public marketing and authentication surfaces */
 .marketing-shell { min-height: 100vh; background: #f6f7f4; color: #191b1d; }
 .marketing-nav { width: min(1180px, calc(100% - 56px)); margin: 0 auto; height: 82px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }

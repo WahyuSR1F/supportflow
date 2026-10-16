@@ -125,6 +125,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .notification-dot { position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--orange); border: 1px solid #fff; }
 .page-wrap { padding: 29px 32px 40px; max-width: 1800px; margin: 0 auto; }
 .page-heading, .section-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; margin-bottom: 25px; }
+.section-toolbar.actions-only { justify-content: flex-end; }
 .eyebrow { display: flex; align-items: center; gap: 7px; color: #959d97; font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
 .eyebrow.compact { margin-bottom: 6px; }
 .eyebrow-line { width: 19px; height: 1px; background: var(--blue); display: inline-block; }

@@ -90,11 +90,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 
 /* Full-bleed WhatsApp-style inbox (no outer page margin) */
 .inbox-fullscreen { margin: -29px -32px -40px; }
-.inbox-fullscreen .inbox-layout { grid-template-columns: minmax(280px, 340px) minmax(440px, 1fr); min-height: calc(100vh - 64px); border-radius: 0; }
+.inbox-fullscreen .inbox-layout { grid-template-columns: minmax(280px, 340px) minmax(440px, 1fr); height: calc(100vh - 64px); min-height: 0; border-radius: 0; }
 .inbox-fullscreen .conversation-panel { border-radius: 0; border-left: 0; border-top: 0; border-bottom: 0; }
 .inbox-fullscreen .thread-panel { border-radius: 0; border-top: 0; border-right: 0; border-bottom: 0; }
 .inbox-fullscreen .conversation-list { max-height: none; }
-.inbox-fullscreen .thread-body { min-height: 380px; }
+.inbox-fullscreen .thread-body { min-height: 0; }
 .inbox-fullscreen .context-panel { display: none; }
 
 .back-button { flex: 0 0 auto; width: 32px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: #6a716c; border-radius: 7px; margin-right: 6px; }
@@ -105,7 +105,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .thread-header .contact-summary { flex: 0 0 auto; }
 
 /* Dedicated full-screen conversation view (no sidebar) */
-.conversation-page { min-height: 100vh; background: var(--canvas); display: flex; }
+.conversation-page { height: 100vh; background: var(--canvas); display: flex; }
 .conversation-page .thread-panel { flex: 1; border: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }
 .conversation-page .thread-body { flex: 1; min-height: 0; }
 
@@ -176,7 +176,8 @@ h1 { font-size: 26px; letter-spacing: -1.1px; line-height: 1.1; }
 @media (max-width: 1100px) { .sidebar { width: 205px; flex-basis: 205px; }.inbox-layout { grid-template-columns: 270px minmax(400px, 1fr); }.context-panel { grid-column: 1 / -1; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 10px 10px; display: grid; grid-template-columns: 1fr 1fr; }.context-header { grid-column: 1; }.customer-card { grid-column: 1; }.detail-grid { grid-column: 1; border-bottom: 0; }.context-section { grid-column: 2; }.context-footer { grid-column: 1 / -1; }.conversation-panel { border-radius: 10px 0 0 0; }.thread-panel { border-radius: 0 10px 0 0; }.metric-row { gap: 8px; }.metric-card { padding: 11px; }.metric-copy strong { font-size: 17px; }.analytics-grid { grid-template-columns: 1fr 1fr; }.chart-card { grid-column: 1 / -1; } }
 @media (max-width: 800px) { .sidebar { width: 62px; flex-basis: 62px; padding: 18px 9px; }.brand-lockup { padding: 0 7px 22px; }.brand-lockup > div:last-child, .workspace-switcher .workspace-copy, .workspace-switcher > svg, .nav-label, .nav-button span, .nav-button em, .sidebar-bottom { display: none; }.workspace-switcher { justify-content: center; padding: 7px; margin-bottom: 18px; }.nav-button { justify-content: center; padding: 0; }.nav-button.active::before { left: -9px; }.page-wrap { padding: 22px 16px 30px; }.topbar { padding: 0 16px; }.live-pill { display: none; }.page-heading { align-items: flex-start; flex-direction: column; gap: 15px; }.heading-actions { width: 100%; }.heading-actions .button { flex: 1; }.metric-row { grid-template-columns: 1fr 1fr; }.inbox-layout { display: flex; flex-direction: column; }.conversation-panel, .thread-panel, .context-panel { border: 1px solid var(--border); border-radius: 10px; }.conversation-panel { order: 0; }.thread-panel { order: 1; border-top: 0; border-radius: 0 0 10px 10px; }.context-panel { order: 2; display: block; border-top: 0; border-radius: 0 0 10px 10px; }.conversation-list { max-height: 320px; }.thread-body { min-height: 360px; }.knowledge-overview { grid-template-columns: 1fr; }.document-row { grid-template-columns: minmax(190px, 1fr) .6fr .8fr 30px; gap: 8px; }.document-row > :nth-child(3), .document-row > :nth-child(4) { display: none; }.document-head > :nth-child(3), .document-head > :nth-child(4) { display: none; }.widget-layout { grid-template-columns: 1fr; }.analytics-grid { grid-template-columns: 1fr; }.chart-card { grid-column: auto; }.overlay { padding: 0 16px 16px; }.overlay-widget { width: min(300px, 100%); }
   .inbox-fullscreen { margin: -22px -16px -30px; }
-  .inbox-fullscreen .inbox-layout { grid-template-columns: 1fr; }
+  .inbox-fullscreen .inbox-layout { grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 64px); }
+  .install-body { grid-template-columns: 1fr; }
   .inbox-fullscreen .thread-panel { display: none; }
   .conversation-page .thread-header { flex-wrap: wrap; }
   .conversation-page .thread-meta { margin-left: 0; width: 100%; padding-left: 38px; }
@@ -203,6 +204,15 @@ h1 { font-size: 26px; letter-spacing: -1.1px; line-height: 1.1; }
 
 .message-attachment-icon { width: 22px; height: 22px; display: grid; place-items: center; background: #f1f3f1; color: #89938b; border-radius: 6px; flex: 0 0 auto; vertical-align: middle; }
 .attachment-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 9px; color: #5c655f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+
+/* Install widget — panduan pasang ke aplikasi lain */
+.install-card { margin-top: 16px; overflow: hidden; }
+.install-body { display: grid; grid-template-columns: minmax(230px, .9fr) 1.7fr; gap: 18px; padding: 16px 17px; align-items: start; }
+.install-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 9px; color: #5d6760; font-size: 10px; line-height: 1.55; }
+.install-snippet { margin: 0; background: #1e2b24; color: #d9e6df; border-radius: 8px; padding: 13px 14px; font-family: 'DM Mono', monospace; font-size: 9px; line-height: 1.65; overflow-x: auto; white-space: pre; }
+.install-alt { grid-column: 1 / -1; border-top: 1px solid #edf0ed; padding-top: 12px; color: #8b938d; font-size: 9px; line-height: 1.6; }
+.install-card code, .install-alt code { font-family: 'DM Mono', monospace; background: #f1f3f1; border: 1px solid #e6eae5; border-radius: 4px; padding: 1px 5px; font-size: 9px; }
+.install-snippet code { background: none; border: 0; padding: 0; color: inherit; }
 
 /* Public marketing and authentication surfaces */
 .marketing-shell { min-height: 100vh; background: #f6f7f4; color: #191b1d; }

@@ -25,7 +25,6 @@ import {
   Inbox,
   LayoutDashboard,
   LifeBuoy,
-  LockKeyhole,
   MessageCircle,
   MoreHorizontal,
   Paperclip,
@@ -509,10 +508,9 @@ function DashboardApp() {
         <div className="page-wrap">
           {activeNav !== 'Inbox' && <div className="page-heading">
             <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : 'See how your support system is performing.'}</p></div>
-            <div className="heading-actions"><button className="button button-secondary" onClick={() => setWidgetOpen(true)}><PanelRight size={16} /> Preview widget</button></div>
           </div>}
 
-          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} setWidgetOpen={setWidgetOpen} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} /></div>}
+          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} /></div>}
           {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
           {activeNav === 'AI Agent' && <AgentsView agents={agents} autoFallback={autoFallback} saving={savingAgents} onSave={saveAgentSettings} />}
           {activeNav === 'Widget' && <WidgetView widgetOpen={widgetOpen} setWidgetOpen={setWidgetOpen} setToast={setToast} />}
@@ -520,7 +518,6 @@ function DashboardApp() {
         </div>
       </main>
 
-      {widgetOpen && activeNav !== 'Widget' && <WidgetOverlay onClose={() => setWidgetOpen(false)} />}
       {toast && <div className="toast"><CheckCircle2 size={17} /> {toast}</div>}
     </div>
   )
@@ -544,7 +541,7 @@ function MetricCard({ label, value, trend, trendLabel, icon, tone }: { label: st
   return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small><b className={tone === 'orange' || tone === 'lilac' ? 'neutral-trend' : ''}>{trend}</b> {trendLabel}</small></div><ArrowUpRight className="metric-arrow" size={15} /></div>
 }
 
-function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, setWidgetOpen, onNewConversation, agents, autoFallback, activeAgent, onAssignAgent, onRegenerate, regenerating, onManageAgents }: { selected: Conversation | null; conversations: Conversation[]; selectedId: string | null; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: (attachment?: Attachment | undefined) => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; setWidgetOpen: (value: boolean) => void; onNewConversation?: () => void; agents: AiAgent[]; autoFallback: boolean; activeAgent: AiAgent | null; onAssignAgent: (agentId: string) => void; onRegenerate: () => void; regenerating: boolean; onManageAgents: () => void }) {
+function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, onNewConversation, agents, autoFallback, activeAgent, onAssignAgent, onRegenerate, regenerating, onManageAgents }: { selected: Conversation | null; conversations: Conversation[]; selectedId: string | null; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: (attachment?: Attachment | undefined) => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; onNewConversation?: () => void; agents: AiAgent[]; autoFallback: boolean; activeAgent: AiAgent | null; onAssignAgent: (agentId: string) => void; onRegenerate: () => void; regenerating: boolean; onManageAgents: () => void }) {
   const [activeThreadDropdown, setActiveThreadDropdown] = useState<string | null>(null)
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   const [attachment, setAttachment] = useState<{ name: string; url: string; type: string } | null>(null)
@@ -624,7 +621,7 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
 
   return <div className="inbox-layout">
     <section className="conversation-panel panel">
-      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><div className="panel-heading-actions"><button className="button button-secondary small" onClick={() => setWidgetOpen(true)}><PanelRight size={14} /> Preview</button><button className="button button-primary small" onClick={() => { onNewConversation?.() ; setToast('New conversation created') }}><Plus size={14} /> New</button><div data-filter-menu style={{ position: 'relative' }}><button className="icon-button subtle" aria-label="Filter conversations" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setFilterMenuOpen(!filterMenuOpen) }}><SlidersHorizontal size={17} /></button>
+      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><div className="panel-heading-actions"><button className="button button-primary small" onClick={() => { onNewConversation?.() ; setToast('New conversation created') }}><Plus size={14} /> New</button><div data-filter-menu style={{ position: 'relative' }}><button className="icon-button subtle" aria-label="Filter conversations" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setFilterMenuOpen(!filterMenuOpen) }}><SlidersHorizontal size={17} /></button>
       {filterMenuOpen && <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 100, minWidth: '150px', background: '#fff', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,0.12)', padding: '6px' }}>
         {['All', 'Needs handoff', 'Unread'].map((label, idx) => <button key={idx} onClick={() => {
             if (label === 'Unread') setFilter('All')
@@ -757,6 +754,19 @@ function KnowledgeView({ documents, addDocument, setToast }: { documents: Knowle
   return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary" onClick={() => setToast('Index is healthy · last sync 2m ago')}><RefreshCw size={15} /> Re-index all</button><button className="button button-primary" onClick={addDocument}><UploadCloud size={15} /> Add document</button></div></div><div className="knowledge-overview"><div className="knowledge-stat"><div className="knowledge-stat-icon blue"><Database size={18} /></div><div><span>Indexed content</span><strong>241</strong><small>chunks available to AI</small></div></div><div className="knowledge-stat"><div className="knowledge-stat-icon mint"><CheckCircle2 size={18} /></div><div><span>Retrieval quality</span><strong>92.8%</strong><small>top-3 relevance score</small></div></div><div className="knowledge-stat"><div className="knowledge-stat-icon orange"><Clock3 size={18} /></div><div><span>Last sync</span><strong>2m ago</strong><small>all systems operational</small></div></div></div><div className="table-card panel"><div className="table-heading"><div><h3>Source documents</h3><span>Only approved workspace documents can ground an AI reply.</span></div><button className="icon-button subtle"><SlidersHorizontal size={17} /></button></div><div className="document-table"><div className="document-row document-head"><span>Name</span><span>Type</span><span>Updated</span><span>Chunks</span><span>Status</span><span /></div>{documents.map((document) => <div className="document-row" key={document.name}><div className="document-name"><div className="document-icon"><FileText size={16} /></div><div><strong>{document.name}</strong><span>{document.size}</span></div></div><span className="file-type">{document.type}</span><span>{document.updated}</span><span>{document.chunks}</span><span className={`index-status ${document.status.toLowerCase()}`}><span className="status-dot" /> {document.status}</span><button className="icon-button subtle" aria-label={`More actions for ${document.name}`}><MoreHorizontal size={17} /></button></div>)}</div></div></div>
 }
 
+const WIDGET_EMBED_SNIPPET = [
+  '<script src="https://unpkg.com/supportflow-widget/src/widget.js"></script>',
+  '<script>',
+  '  window.SUPPORTFLOW_WIDGET_CONFIG = {',
+  '    baseUrl: "https://YOUR-SUPPORTFLOW-HOST",',
+  '    conversationId: "your-conversation-id",',
+  '    title: "Northstar concierge",',
+  '    accentColor: "#4263eb",',
+  '    endpoints: "*"',
+  '  }',
+  '</script>',
+].join('\n')
+
 function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boolean; setWidgetOpen: (value: boolean) => void; setToast: (value: string) => void }) {
   const [widgetMessage, setWidgetMessage] = useState('')
   const [widgetPending, setWidgetPending] = useState(false)
@@ -825,7 +835,29 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
     }
   }
 
-  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary" onClick={() => setToast('Embed snippet copied to clipboard')}><Copy size={15} /> Copy embed code</button><button className="button button-primary" onClick={() => setWidgetOpen(!widgetOpen)}><Eye size={15} /> {widgetOpen ? 'Hide preview' : 'Open preview'}</button></div></div><div className="widget-layout"><div className="widget-config panel"><div className="table-heading"><div><h3>Widget configuration</h3><span>Give visitors a clear path to a helpful answer.</span></div><div className="configured-pill"><Check size={13} /> Published</div></div><div className="config-form"><label>Widget name<input defaultValue="Northstar concierge" /></label><label>Welcome message<textarea defaultValue="Hi there — how can we help today?" /></label><div className="config-split"><label>Accent color<div className="color-input"><span className="color-swatch" /> #4263EB <ChevronDown size={14} /></div></label><label>Human handoff<div className="select-input">Enabled <ChevronDown size={14} /></div></label></div><div className="toggle-setting"><div><strong>Show AI confidence</strong><span>Let agents see the grounding signal before sending.</span></div><div className="toggle on"><span /></div></div><div className="toggle-setting"><div><strong>Collect contact details</strong><span>Ask for email when the visitor requests a human.</span></div><div className="toggle on"><span /></div></div><button className="button button-primary full" onClick={() => setToast('Widget settings saved')}>Save widget settings</button></div></div><div className="widget-preview-card panel"><div className="preview-label"><span><MonitorDot /> Live preview</span><span className="preview-status"><span className="live-pulse" /> Published</span></div><div className="browser-frame"><div className="browser-top"><span /><span /><span /><small>northstar-goods.com</small></div><div className="browser-page"><div className="fake-site-nav"><strong>northstar</strong><span>New arrivals</span><span>Collections</span><span>About</span><span className="fake-cart">Bag (2)</span></div><div className="fake-hero"><span>SPRING / SUMMER 24</span><strong>Everyday objects,<br />made considered.</strong><button>Explore collection <ArrowUpRight size={13} /></button></div><div className="widget-launcher" onClick={() => setWidgetOpen(!widgetOpen)}><MessageCircle size={20} /></div>{widgetOpen && <div className="widget-mini"><div className="widget-mini-head"><div className="widget-logo"><Sparkles size={14} /></div><div><strong>Northstar concierge</strong><span>{widgetHandoff ? 'Terhubung ke tim Customer Service' : 'Usually replies instantly'}</span></div><button onClick={() => setWidgetOpen(false)}>×</button></div><div className="widget-mini-body" aria-live="polite">{widgetMessages.map((message, index) => <div className={`mini-chat ${message.role === 'user' ? 'outgoing' : 'incoming'}`} key={`${message.role}-${index}`}>{message.content}</div>)}{widgetPending && <div className="typing-indicator"><span /><span /><span /><em>AI is typing…</em></div>}</div><div className="widget-mini-input"><input value={widgetMessage} onChange={(event) => setWidgetMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendWidgetMessage() }} placeholder={widgetPending ? 'AI is typing…' : 'Write a message…'} aria-label="Widget message" disabled={widgetPending} /><button onClick={() => void sendWidgetMessage()} aria-label="Send widget message" disabled={widgetPending}><Send size={14} /></button></div></div>}</div></div></div></div></div>
+  const copyEmbedCode = async () => {
+    try {
+      await navigator.clipboard.writeText(WIDGET_EMBED_SNIPPET)
+      setToast('Embed snippet copied to clipboard')
+    } catch {
+      setToast('Gagal menyalin — blok kode lalu tekan Ctrl+C')
+    }
+  }
+
+  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary" onClick={copyEmbedCode}><Copy size={15} /> Copy embed code</button><button className="button button-primary" onClick={() => setWidgetOpen(!widgetOpen)}><Eye size={15} /> {widgetOpen ? 'Hide preview' : 'Open preview'}</button></div></div><div className="widget-layout"><div className="widget-config panel"><div className="table-heading"><div><h3>Widget configuration</h3><span>Give visitors a clear path to a helpful answer.</span></div><div className="configured-pill"><Check size={13} /> Published</div></div><div className="config-form"><label>Widget name<input defaultValue="Northstar concierge" /></label><label>Welcome message<textarea defaultValue="Hi there — how can we help today?" /></label><div className="config-split"><label>Accent color<div className="color-input"><span className="color-swatch" /> #4263EB <ChevronDown size={14} /></div></label><label>Human handoff<div className="select-input">Enabled <ChevronDown size={14} /></div></label></div><div className="toggle-setting"><div><strong>Show AI confidence</strong><span>Let agents see the grounding signal before sending.</span></div><div className="toggle on"><span /></div></div><div className="toggle-setting"><div><strong>Collect contact details</strong><span>Ask for email when the visitor requests a human.</span></div><div className="toggle on"><span /></div></div><button className="button button-primary full" onClick={() => setToast('Widget settings saved')}>Save widget settings</button></div></div><div className="widget-preview-card panel"><div className="preview-label"><span><MonitorDot /> Live preview</span><span className="preview-status"><span className="live-pulse" /> Published</span></div><div className="browser-frame"><div className="browser-top"><span /><span /><span /><small>northstar-goods.com</small></div><div className="browser-page"><div className="fake-site-nav"><strong>northstar</strong><span>New arrivals</span><span>Collections</span><span>About</span><span className="fake-cart">Bag (2)</span></div><div className="fake-hero"><span>SPRING / SUMMER 24</span><strong>Everyday objects,<br />made considered.</strong><button>Explore collection <ArrowUpRight size={13} /></button></div><div className="widget-launcher" onClick={() => setWidgetOpen(!widgetOpen)}><MessageCircle size={20} /></div>{widgetOpen && <div className="widget-mini"><div className="widget-mini-head"><div className="widget-logo"><Sparkles size={14} /></div><div><strong>Northstar concierge</strong><span>{widgetHandoff ? 'Terhubung ke tim Customer Service' : 'Usually replies instantly'}</span></div><button onClick={() => setWidgetOpen(false)}>×</button></div><div className="widget-mini-body" aria-live="polite">{widgetMessages.map((message, index) => <div className={`mini-chat ${message.role === 'user' ? 'outgoing' : 'incoming'}`} key={`${message.role}-${index}`}>{message.content}</div>)}{widgetPending && <div className="typing-indicator"><span /><span /><span /><em>AI is typing…</em></div>}</div><div className="widget-mini-input"><input value={widgetMessage} onChange={(event) => setWidgetMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendWidgetMessage() }} placeholder={widgetPending ? 'AI is typing…' : 'Write a message…'} aria-label="Widget message" disabled={widgetPending} /><button onClick={() => void sendWidgetMessage()} aria-label="Send widget message" disabled={widgetPending}><Send size={14} /></button></div></div>}</div></div></div></div><div className="install-card panel">
+        <div className="table-heading"><div><h3>Pasang widget di aplikasi lain</h3><span>Tempel snippet ini ke halaman HTML aplikasi kamu — launcher widget muncul di pojok kanan bawah.</span></div><button className="button button-secondary small" onClick={copyEmbedCode}><Copy size={14} /> Salin kode</button></div>
+        <div className="install-body">
+          <ol className="install-steps">
+            <li>Klik <strong>Salin kode</strong> untuk menyalin snippet di sebelahnya.</li>
+            <li>Tempel sebelum tag <code>&lt;/body&gt;</code> pada halaman HTML aplikasi tujuan.</li>
+            <li>Ganti <code>baseUrl</code> dengan URL backend SupportFlow kamu, dan isi <code>conversationId</code> biperlukan.</li>
+            <li>Buka halaman tersebut — launcher widget siap dipakai.</li>
+          </ol>
+          <pre className="install-snippet"><code>{WIDGET_EMBED_SNIPPET}</code></pre>
+          <div className="install-alt">Cara lain (proyek npm): <code>npm install supportflow-widget</code> lalu <code>npx supportflow-widget init</code>, atau dari React/Vue/Next.js panggil <code>{'SupportFlowWidget.init({ baseUrl, conversationId, title, accentColor })'}</code>.</div>
+        </div>
+      </div>
+    </div>
 }
 
 function AnalyticsView() {
@@ -952,10 +984,6 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
       </div>
     </div>
   )
-}
-
-function WidgetOverlay({ onClose }: { onClose: () => void }) {
-  return <div className="overlay" onClick={onClose}><div className="overlay-widget" onClick={(event) => event.stopPropagation()}><div className="overlay-widget-head"><div className="widget-logo"><Sparkles size={15} /></div><div><strong>Northstar concierge</strong><span>Usually replies instantly</span></div><button onClick={onClose} aria-label="Close widget">×</button></div><div className="overlay-widget-body"><div className="mini-chat incoming">Hi there — how can we help today?</div><div className="mini-chat outgoing">Can I change my delivery address?</div><div className="mini-chat incoming">I can help check that. Let me look up your order details.</div></div><div className="overlay-widget-input">Write a message… <Send size={15} /></div><div className="overlay-widget-footer"><LockKeyhole size={12} /> Powered by SupportFlow AI</div></div></div>
 }
 
 function MonitorDot() { return <span className="monitor-dot" /> }

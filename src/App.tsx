@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CircleHelp,
   Clock3,
   Code2,
@@ -37,6 +38,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Tag,
+  Trash2,
   UploadCloud,
   UserRound,
   UsersRound,
@@ -45,7 +47,20 @@ import {
 import { AuthCallbackPage, AuthPage, LandingPage } from './Marketing'
 import './styles.css'
 
-type NavItem = 'Inbox' | 'Knowledge base' | 'Widget' | 'Analytics'
+type NavItem = 'Inbox' | 'Knowledge base' | 'Widget' | 'Analytics' | 'AI Agent'
+type AgentStatus = 'ready' | 'exhausted' | 'unconfigured' | 'disabled'
+
+type AiAgent = {
+  id: string
+  name: string
+  model: string
+  apiUrl: string
+  keyHint: string
+  enabled: boolean
+  status: AgentStatus
+}
+
+type AgentDraft = AiAgent & { apiKeyInput?: string }
 type Channel = 'WhatsApp' | 'Instagram' | 'Web chat'
 type ConversationStatus = 'AI active' | 'Needs handoff' | 'Agent controlled' | 'Resolved'
 type MessageKind = 'customer' | 'ai' | 'agent'
@@ -78,6 +93,8 @@ type Conversation = {
   confidence: number
   sentiment: 'Positive' | 'Neutral' | 'At risk'
   firstResponse: string
+  agentId?: string
+  suggestion: string
   messages: Message[]
 }
 
@@ -89,6 +106,12 @@ type KnowledgeDocument = {
   updated: string
   chunks: string
 }
+
+const DEFAULT_SUGGESTION = 'Here’s a clear answer based on the latest support policy. I can also connect you with a specialist if you need help with anything else.'
+
+const defaultAgents: AiAgent[] = [
+  { id: 'primary', name: 'Primary · Managed LLM', model: 'gpt-5-mini', apiUrl: '', keyHint: '', enabled: true, status: 'unconfigured' },
+]
 
 const initialConversations: Conversation[] = [
   {
@@ -108,6 +131,7 @@ const initialConversations: Conversation[] = [
     confidence: 62,
     sentiment: 'At risk',
     firstResponse: '42 sec',
+    suggestion: 'I can help with that. Address changes may be possible before your order ships. Let me check the order status and I’ll confirm the next step for you.',
     messages: [
       { from: 'customer', text: 'Hi! I just placed order #8421, but I noticed the delivery address is wrong.', time: '09:41' },
       { from: 'ai', text: 'I can help check that for you. What would you like to update the address to?', time: '09:41' },
@@ -131,6 +155,7 @@ const initialConversations: Conversation[] = [
     confidence: 94,
     sentiment: 'Positive',
     firstResponse: '8 sec',
+    suggestion: DEFAULT_SUGGESTION,
     messages: [
       { from: 'customer', text: 'The new collection looks great — do you ship to Singapore?', time: '09:35' },
       { from: 'ai', text: 'Yes — we ship to Singapore. Standard delivery is 3–5 business days and express is 1–2 business days.', time: '09:35' },
@@ -153,6 +178,7 @@ const initialConversations: Conversation[] = [
     confidence: 97,
     sentiment: 'Positive',
     firstResponse: '11 sec',
+    suggestion: DEFAULT_SUGGESTION,
     messages: [
       { from: 'customer', text: 'How long do I have to return an item?', time: '09:24' },
       { from: 'ai', text: 'You have 30 days from delivery to request a return. Items should be unused and in the original packaging.', time: '09:24' },
@@ -176,6 +202,7 @@ const initialConversations: Conversation[] = [
     confidence: 55,
     sentiment: 'At risk',
     firstResponse: '1m 02s',
+    suggestion: 'I’m checking the payment authorizations now. I’ll confirm whether one of the charges is only a temporary hold and update you shortly.',
     messages: [
       { from: 'customer', text: 'I was charged twice for the same order. Can someone please look into this?', time: '09:16' },
       { from: 'agent', text: 'Hi Noah — I’m looking into the duplicate authorization now. I’ll update you in a moment.', time: '09:17' },
@@ -198,6 +225,7 @@ const initialConversations: Conversation[] = [
     confidence: 91,
     sentiment: 'Neutral',
     firstResponse: '14 sec',
+    suggestion: DEFAULT_SUGGESTION,
     messages: [
       { from: 'customer', text: 'Where can I find the care instructions for linen?', time: '09:09' },
       { from: 'ai', text: 'For linen, wash cold on a gentle cycle and lay flat or hang to dry. Avoid bleach and high heat.', time: '09:09' },
@@ -219,13 +247,13 @@ function ChannelIcon({ channel, small = false }: { channel: Channel; small?: boo
   return <MessageCircle {...iconProps} />
 }
 
-function StatusBadge({ status }: { status: ConversationStatus }) {
+function StatusBadge({ status, onClick }: { status: ConversationStatus; onClick?: () => void }) {
   const className = status.toLowerCase().replaceAll(' ', '-')
   return (
-    <span className={`status-badge ${className}`}>
+    <button type="button" className={`status-badge ${className}`} onClick={onClick} style={{ border: 'none' }}>
       <span className="status-dot" />
       {status}
-    </span>
+    </button>
   )
 }
 
@@ -235,19 +263,151 @@ function Avatar({ conversation, size = 'md' }: { conversation: Conversation; siz
 
 function DashboardApp() {
   const path = window.location.pathname
-  const initialNav: NavItem = path.includes('knowledge') ? 'Knowledge base' : path.includes('widget') ? 'Widget' : path.includes('analytics') ? 'Analytics' : 'Inbox'
+  const initialNav: NavItem = path.includes('agents') ? 'AI Agent' : path.includes('knowledge') ? 'Knowledge base' : path.includes('widget') ? 'Widget' : path.includes('analytics') ? 'Analytics' : 'Inbox'
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav)
   const [collapsed, setCollapsed] = useState(false)
   const [conversations, setConversations] = useState(initialConversations)
   const [documents, setDocuments] = useState(initialDocuments)
-  const [selectedId, setSelectedId] = useState('mira')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filter, setFilter] = useState<'All' | ConversationStatus>('All')
   const [composer, setComposer] = useState('')
   const [widgetOpen, setWidgetOpen] = useState(false)
   const [toast, setToast] = useState('')
+  const [agents, setAgents] = useState<AiAgent[]>(defaultAgents)
+  const [autoFallback, setAutoFallback] = useState(true)
+  const [savingAgents, setSavingAgents] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const selected = selectedId ? conversations.find((conversation) => conversation.id === selectedId) ?? null : null
+  const activeAgent = useMemo(() => {
+    if (!selected) return null
+    const explicit = selected.agentId ? agents.find((agent) => agent.id === selected.agentId) : undefined
+    return explicit ?? agents.find((agent) => agent.enabled && agent.status === 'ready') ?? agents.find((agent) => agent.enabled) ?? null
+  }, [agents, selected])
 
-  const selected = conversations.find((conversation) => conversation.id === selectedId) ?? conversations[0]
+  const handleNewConversation = () => {
+    setConversations((current) => {
+      const newId = `new-${Date.now()}`
+      const base = current[0]
+      const nextConv: Conversation = {
+        ...base,
+        id: newId,
+        name: 'New contact',
+        initials: 'NC',
+        avatar: base.avatar,
+        channel: 'WhatsApp',
+        preview: 'Type a message to start the conversation...',
+        status: 'AI active',
+        unread: 0,
+        location: 'Jakarta, ID',
+        customerType: 'New customer',
+        tags: [],
+        confidence: 95,
+        sentiment: 'Positive',
+        firstResponse: 'Pending',
+        suggestion: DEFAULT_SUGGESTION,
+        messages: [],
+      }
+      setSelectedId(newId)
+      return [nextConv, ...current]
+    })
+    setToast('New conversation created')
+  }
+
+  const showToast = (value: string) => {
+    setToast(value)
+    window.setTimeout(() => setToast(''), 2600)
+  }
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/agents').then(async (response) => {
+      if (!response.ok) throw new Error('agents unavailable')
+      const payload = await response.json() as { agents?: AiAgent[]; autoFallback?: boolean }
+      if (active && Array.isArray(payload.agents) && payload.agents.length) {
+        setAgents(payload.agents)
+        setAutoFallback(payload.autoFallback !== false)
+      }
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
+
+  const assignAgent = (agentId: string) => {
+    const agent = agents.find((item) => item.id === agentId)
+    if (!agent || !selected) return
+    const applyAgent = (id: string) => setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, agentId: id } : conversation))
+    if (agent.status === 'exhausted' && autoFallback) {
+      const fallback = agents.find((item) => item.enabled && item.status === 'ready' && item.id !== agent.id)
+      if (!fallback) {
+        showToast(`Quota ${agent.name} exhausted · no backup agent available`)
+        return
+      }
+      applyAgent(fallback.id)
+      showToast(`Quota ${agent.name} exhausted · router switched to ${fallback.name} automatically`)
+      return
+    }
+    if (agent.status === 'exhausted') {
+      showToast(`Quota ${agent.name} exhausted · auto-switch is off`)
+      return
+    }
+    applyAgent(agent.id)
+    showToast(`${agent.name} now handles this conversation`)
+  }
+
+  const saveAgentSettings = async (draft: AgentDraft[], nextAutoFallback: boolean) => {
+    setSavingAgents(true)
+    try {
+      const response = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agents: draft.map((agent) => ({ id: agent.id, name: agent.name, model: agent.model, apiUrl: agent.apiUrl, enabled: agent.enabled, apiKey: agent.apiKeyInput?.trim() || undefined })),
+          autoFallback: nextAutoFallback,
+        }),
+      })
+      const payload = await response.json() as { agents?: AiAgent[]; autoFallback?: boolean; error?: string }
+      if (!response.ok || !Array.isArray(payload.agents)) throw new Error(payload.error ?? 'Save failed')
+      setAgents(payload.agents)
+      setAutoFallback(payload.autoFallback !== false)
+      showToast('AI agent settings saved')
+    } catch {
+      showToast('Could not save agent settings · check your session')
+    } finally {
+      setSavingAgents(false)
+    }
+  }
+
+  const regenerateSuggestion = async () => {
+    if (!selected || regenerating) return
+    const chatMessages: WidgetChatMessage[] = []
+    for (const message of selected.messages) {
+      chatMessages.push({ role: message.from === 'customer' ? 'user' : 'assistant', content: message.text })
+    }
+    while (chatMessages.length && chatMessages[chatMessages.length - 1].role !== 'user') chatMessages.pop()
+    if (!chatMessages.length) {
+      showToast('AI needs a customer message before it can draft a reply')
+      return
+    }
+    setRegenerating(true)
+    try {
+      const response = await fetch('/api/chat/public', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId: `inbox:${selected.id}`, messages: chatMessages, agentId: activeAgent?.id }),
+      })
+      const payload = await response.json() as { message?: string; error?: string; agent?: { id: string; name: string }; switchedFrom?: string | null }
+      if (!response.ok || !payload.message) throw new Error(payload.error ?? 'AI suggestion unavailable')
+      const suggested = payload.message
+      setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, suggestion: suggested } : conversation))
+      const answeredBy = payload.agent?.name ?? 'Knowledge Base fallback'
+      showToast(payload.switchedFrom ? `Quota ${payload.switchedFrom} exhausted · routed to ${answeredBy}` : `Suggestion generated by ${answeredBy}`)
+    } catch {
+      showToast('AI suggestion unavailable · try again shortly')
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
   const filteredConversations = useMemo(() => {
     return conversations.filter((conversation) => {
       const matchesQuery = `${conversation.name} ${conversation.preview} ${conversation.channel}`.toLowerCase().includes(searchQuery.toLowerCase())
@@ -258,19 +418,19 @@ function DashboardApp() {
 
   const navigate = (item: NavItem) => {
     setActiveNav(item)
-    const route = item === 'Inbox' ? '/app' : item === 'Knowledge base' ? '/app/knowledge' : item === 'Widget' ? '/app/widget' : '/app/analytics'
+    const route = item === 'Inbox' ? '/app' : item === 'Knowledge base' ? '/app/knowledge' : item === 'Widget' ? '/app/widget' : item === 'AI Agent' ? '/app/agents' : '/app/analytics'
     window.history.replaceState({}, '', route)
   }
 
   const updateSelectedStatus = (status: ConversationStatus, message: string) => {
-    setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, status } : conversation))
+    setConversations((current) => current.map((conversation) => conversation.id === selected?.id ? { ...conversation, status } : conversation))
     setToast(message)
     window.setTimeout(() => setToast(''), 2400)
   }
 
   const sendMessage = () => {
     if (!composer.trim()) return
-    setConversations((current) => current.map((conversation) => conversation.id === selected.id ? {
+    setConversations((current) => current.map((conversation) => conversation.id === selected?.id ? {
       ...conversation,
       status: 'Agent controlled',
       preview: composer.trim(),
@@ -311,6 +471,7 @@ function DashboardApp() {
           <NavButton icon={<Code2 size={17} />} label="Widget" active={activeNav === 'Widget'} onClick={() => navigate('Widget')} />
           <NavButton icon={<BarChart3 size={17} />} label="Analytics" active={activeNav === 'Analytics'} onClick={() => navigate('Analytics')} />
           <div className="nav-label nav-label-spaced">Manage</div>
+          <NavButton icon={<Bot size={17} />} label="AI Agent" active={activeNav === 'AI Agent'} count={String(agents.filter((agent) => agent.enabled).length)} onClick={() => navigate('AI Agent')} />
           <NavButton icon={<UsersRound size={17} />} label="Team" onClick={() => setToast('Team settings are coming next')} />
           <NavButton icon={<Settings2 size={17} />} label="Settings" onClick={() => setToast('Settings are coming next')} />
         </nav>
@@ -329,12 +490,13 @@ function DashboardApp() {
 
         <div className="page-wrap">
           {activeNav !== 'Inbox' && <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : 'See how your support system is performing.'}</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : 'See how your support system is performing.'}</p></div>
             <div className="heading-actions"><button className="button button-secondary" onClick={() => setWidgetOpen(true)}><PanelRight size={16} /> Preview widget</button>{activeNav === 'Knowledge base' && <button className="button button-primary" onClick={addDocument}><Plus size={16} /> Add document</button>}</div>
           </div>}
 
-          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} setWidgetOpen={setWidgetOpen} /></div>}
+          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} setWidgetOpen={setWidgetOpen} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} /></div>}
           {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
+          {activeNav === 'AI Agent' && <AgentsView agents={agents} autoFallback={autoFallback} saving={savingAgents} onSave={saveAgentSettings} />}
           {activeNav === 'Widget' && <WidgetView widgetOpen={widgetOpen} setWidgetOpen={setWidgetOpen} setToast={setToast} />}
           {activeNav === 'Analytics' && <AnalyticsView />}
         </div>
@@ -350,39 +512,117 @@ function NavButton({ icon, label, active, count, onClick }: { icon: React.ReactN
   return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span>{count && <em>{count}</em>}<span className="nav-tooltip" aria-hidden="true">{label}</span></button>
 }
 
+function ButtonDropdown({ actions, conversationId, onClose }: { actions: Array<{ label: string, onClick: () => void }>, conversationId: string, onClose: () => void }) {
+  return <div style={{ position: 'relative' }}>
+    <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', zIndex: 100, minWidth: '150px', background: '#fff', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,0.12)', padding: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+      {actions.map((action, index) => <button key={index} onClick={(e: React.MouseEvent) => { e.stopPropagation(); action.onClick(); onClose() }} style={{ all: 'unset', width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: '9px', color: '#6e7670', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {action.label}
+      </button>)}
+    </div>
+  </div>
+}
+
 function MetricCard({ label, value, trend, trendLabel, icon, tone }: { label: string; value: string; trend: string; trendLabel: string; icon: React.ReactNode; tone: string }) {
   return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small><b className={tone === 'orange' || tone === 'lilac' ? 'neutral-trend' : ''}>{trend}</b> {trendLabel}</small></div><ArrowUpRight className="metric-arrow" size={15} /></div>
 }
 
-function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, setWidgetOpen }: { selected: Conversation; conversations: Conversation[]; selectedId: string; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: () => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; setWidgetOpen: (value: boolean) => void }) {
+function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, setWidgetOpen, onNewConversation, agents, autoFallback, activeAgent, onAssignAgent, onRegenerate, regenerating, onManageAgents }: { selected: Conversation | null; conversations: Conversation[]; selectedId: string | null; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: () => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; setWidgetOpen: (value: boolean) => void; onNewConversation?: () => void; agents: AiAgent[]; autoFallback: boolean; activeAgent: AiAgent | null; onAssignAgent: (agentId: string) => void; onRegenerate: () => void; regenerating: boolean; onManageAgents: () => void }) {
+  const [activeThreadDropdown, setActiveThreadDropdown] = useState<string | null>(null)
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!activeThreadDropdown) return
+      const target = event.target as Element
+      if (!target) return
+      const container = document.querySelector(`[data-app-id="${activeThreadDropdown}"]`)
+      if (container && container.contains(target)) return
+      setActiveThreadDropdown(null)
+    }
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActiveThreadDropdown(null)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onEscape)
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onEscape)
+    }
+  }, [activeThreadDropdown])
+
+  useEffect(() => {
+    const closeFilterMenu = (event: MouseEvent) => {
+      if (!filterMenuOpen) return
+      const target = event.target as Element
+      if (!target) return
+      if (target.closest('[data-filter-menu]')) return
+      setFilterMenuOpen(false)
+    }
+    window.addEventListener('mousedown', closeFilterMenu)
+    return () => window.removeEventListener('mousedown', closeFilterMenu)
+  }, [filterMenuOpen])
+
+  function handleMarkAsRead() {
+    setToast('Conversation marked as read')
+    setActiveThreadDropdown(null)
+  }
+  function handleArchive() {
+    setToast('Conversation archived')
+    setActiveThreadDropdown(null)
+  }
+  function handleDelete() {
+    setToast('Conversation deleted')
+    setActiveThreadDropdown(null)
+  }
+
   return <div className="inbox-layout">
     <section className="conversation-panel panel">
-      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><div className="panel-heading-actions"><button className="button button-secondary small" onClick={() => setWidgetOpen(true)}><PanelRight size={14} /> Preview</button><button className="button button-primary small" onClick={() => setToast('New conversation flow started')}><Plus size={14} /> New</button><button className="icon-button subtle" aria-label="Filter conversations"><SlidersHorizontal size={17} /></button></div></div>
+      <div className="panel-heading"><div><h2>Conversations</h2><span className="heading-count">128 open</span></div><div className="panel-heading-actions"><button className="button button-secondary small" onClick={() => setWidgetOpen(true)}><PanelRight size={14} /> Preview</button><button className="button button-primary small" onClick={() => { onNewConversation?.() ; setToast('New conversation created') }}><Plus size={14} /> New</button><div data-filter-menu style={{ position: 'relative' }}><button className="icon-button subtle" aria-label="Filter conversations" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setFilterMenuOpen(!filterMenuOpen) }}><SlidersHorizontal size={17} /></button>
+      {filterMenuOpen && <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 100, minWidth: '150px', background: '#fff', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,0.12)', padding: '6px' }}>
+        {['All', 'Needs handoff', 'Unread'].map((label, idx) => <button key={idx} onClick={() => {
+            if (label === 'Unread') setFilter('All')
+            else setFilter(label as 'All' | ConversationStatus)
+            setFilterMenuOpen(false)
+            setToast(`Filter: ${label}`)
+          }} style={{ all: 'unset', width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: '9px', color: '#6e7670', borderRadius: '6px', cursor: 'pointer' }}>{label}</button>)}
+      </div>}</div></div></div>
       <div className="search-field"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" /><kbd>⌘ K</kbd></div>
       <div className="filter-row"><FilterChip label="All" active={filter === 'All'} count="128" onClick={() => setFilter('All')} /><FilterChip label="Needs handoff" active={filter === 'Needs handoff'} count="12" onClick={() => setFilter('Needs handoff')} /><FilterChip label="Unread" active={false} count="6" onClick={() => setFilter('All')} /></div>
       <div className="conversation-list">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => { setSelectedId(conversation.id); window.history.pushState({}, '', `/app/inbox/${conversation.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />)}{conversations.length === 0 && <div className="empty-state"><Search size={24} /><strong>No conversations found</strong><span>Try a different search or filter.</span></div>}</div>
       <div className="list-footer"><span>Showing {conversations.length} of 128</span><button>View all <ArrowUpRight size={13} /></button></div>
     </section>
 
-    <section className="thread-panel panel">
-      <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={selected} size="lg" /><div><div className="contact-name-row"><h2>{selected.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={selected.channel} small /> {selected.channel}</span><span className="contact-location">{selected.location}</span></div><div className="thread-actions"><StatusBadge status={selected.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
-      {selected.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button onClick={() => updateSelectedStatus('Agent controlled', 'You took over the conversation')}>Take over <ArrowUpRight size={14} /></button></div>}
-      <div className="thread-body"><div className="date-divider"><span>Today</span></div>{selected.messages.map((message, index) => <MessageBubble key={`${selected.id}-${index}`} message={message} conversation={selected} />)}<TypingIndicator /></div>
-      <div className="reply-assistant"><div className="assistant-title"><div className="assistant-label"><div className="sparkle-icon"><Sparkles size={15} /></div><strong>AI suggested reply</strong></div><button className="button button-ghost small" onClick={() => setComposer('')}>Edit response</button></div>
-        <p>{selected.id === 'mira' ? 'I can help with that. Address changes may be possible before your order ships. Let me check the order status and I’ll confirm the next step for you.' : selected.id === 'noah' ? 'I’m checking the payment authorizations now. I’ll confirm whether one of the charges is only a temporary hold and update you shortly.' : 'Here’s a clear answer based on the latest support policy. I can also connect you with a specialist if you need help with anything else.'}</p>
-        <div className="assistant-actions"><button className="button button-primary small" onClick={() => setComposer(selected.id === 'mira' ? 'I can help with that. Address changes may be possible before your order ships. Let me check the order status and I’ll confirm the next step for you.' : 'I’m checking the payment authorizations now. I’ll confirm the next step and update you shortly.')}><Sparkles size={14} /> Use reply</button></div>
+    {selected ? <section className="thread-panel panel">
+      <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app') }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={selected!} size="lg" /><div><div className="contact-name-row"><h2>{selected!.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={selected!.channel} small /> {selected!.channel}</span><span className="contact-location">{selected!.location}</span></div><div className="thread-actions"><AgentSelect agents={agents.filter((agent) => agent.enabled)} activeAgent={activeAgent} autoFallback={autoFallback} onAssign={onAssignAgent} onManage={onManageAgents} /><StatusBadge status={selected!.status} onClick={() => {
+            const next = selected!.status === 'AI active' ? 'Needs handoff' : selected!.status === 'Needs handoff' ? 'Agent controlled' : selected!.status === 'Agent controlled' ? 'Resolved' : 'AI active'
+            updateSelectedStatus(next, next === 'AI active' ? 'AI activated' : next === 'Needs handoff' ? 'Needs handoff flagged' : next === 'Agent controlled' ? 'You took over the conversation' : 'Conversation resolved')
+          }} />
+            <div data-app-id={selected!.id} style={{ position: 'relative' }}>
+              <button className="button button-secondary small" type="button" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveThreadDropdown(activeThreadDropdown === selected!.id ? null : selected!.id) }}>{activeThreadDropdown === selected!.id ? 'X' : 'More...'}</button>
+              {activeThreadDropdown === selected!.id && <ButtonDropdown actions={[
+                { label: 'Mark as read', onClick: handleMarkAsRead },
+                { label: 'Archive', onClick: handleArchive },
+                { label: 'Delete', onClick: handleDelete }
+              ]} conversationId={selected!.id} onClose={() => setActiveThreadDropdown(null)} />}
+            </div>
+          </div></div>
+      {selected!.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button onClick={() => updateSelectedStatus('Agent controlled', 'You took over the conversation')}>Take over <ArrowUpRight size={14} /></button></div>}
+      <div className="thread-body"><div className="date-divider"><span>Today</span></div>{selected!.messages.map((message, index) => <MessageBubble key={`${selected!.id}-${index}`} message={message} conversation={selected} />)}<TypingIndicator /></div>
+      <div className="reply-assistant"><div className="assistant-title"><div className="assistant-label"><div className="sparkle-icon"><Sparkles size={15} /></div><strong>AI suggested reply</strong><span>· {activeAgent?.name ?? 'auto router'}</span></div><button className="button button-ghost small" onClick={() => setComposer(selected!.suggestion)}>Edit response</button></div>
+        <p>{selected!.suggestion}</p>
+        <div className="assistant-actions"><button className="button button-primary small" onClick={() => setComposer(selected!.suggestion)}><Sparkles size={14} /> Use reply</button><button className="button button-secondary small" onClick={onRegenerate} disabled={regenerating}><RefreshCw size={13} /> {regenerating ? 'Generating…' : 'Regenerate'}</button></div>
       </div>
-      <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {selected.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
-    </section>
+      <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {selected!.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'}{activeAgent ? ` · ${activeAgent.name}` : ''} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
+    </section> : <section className="thread-panel panel"><div className="empty-state"><MessageCircle size={42} /><strong style={{ fontSize: '14px' }}>No conversation selected</strong><span style={{ fontSize: '11px' }}>Choose a conversation or click New to start</span></div></section>}
 
-    <aside className="context-panel">
+    {selected && <aside className="context-panel">
       <div className="context-header"><div><span className="eyebrow compact">CONVERSATION CONTEXT</span><h2>Customer details</h2></div><button className="icon-button subtle" aria-label="Close context panel"><PanelRight size={17} /></button></div>
-      <div className="customer-card"><Avatar conversation={selected} size="md" /><div><strong>{selected.name}</strong><span>{selected.customerType}</span></div><button className="icon-button subtle" aria-label="Customer actions"><MoreHorizontal size={17} /></button></div>
-      <div className="detail-grid"><div><span>Location</span><strong>{selected.location}</strong></div><div><span>First response</span><strong>{selected.firstResponse}</strong></div><div><span>Sentiment</span><strong className={`sentiment ${selected.sentiment.toLowerCase().replaceAll(' ', '-')}`}>{selected.sentiment}</strong></div><div><span>Last seen</span><strong>Just now</strong></div></div>
-      <div className="context-section"><div className="section-title"><span>Tags</span><button className="text-button"><Plus size={13} /> Add</button></div><div className="tag-row">{selected.tags.map((tag) => <span className="tag" key={tag}><Tag size={11} /> {tag}</span>)}</div></div>
-      <div className="context-section"><div className="section-title"><span>Handoff control</span><span className="live-label"><span className="live-pulse" /> Live</span></div><div className="control-card"><div className="control-line"><div className="control-icon blue"><Bot size={15} /></div><div><strong>AI handling</strong><span>{selected.status === 'Agent controlled' ? 'Paused by agent' : selected.status === 'Resolved' ? 'Thread resolved' : 'Active on this thread'}</span></div><div className={`toggle ${selected.status !== 'Agent controlled' && selected.status !== 'Resolved' ? 'on' : ''}`}><span /></div></div><div className="control-divider" /><div className="control-line"><div className="control-icon orange"><Headphones size={15} /></div><div><strong>Human handoff</strong><span>{selected.status === 'Needs handoff' ? 'Recommended' : 'Available to team'}</span></div><button className="assign-button" onClick={() => updateSelectedStatus(selected.status === 'Agent controlled' ? 'AI active' : 'Agent controlled', selected.status === 'Agent controlled' ? 'Conversation returned to AI' : 'You took over the conversation')}>{selected.status === 'Agent controlled' ? 'Return to AI' : 'Take over'}</button></div></div></div>
+      <div className="customer-card"><Avatar conversation={selected!} size="md" /><div><strong>{selected!.name}</strong><span>{selected!.customerType}</span></div><button className="icon-button subtle" aria-label="Customer actions"><MoreHorizontal size={17} /></button></div>
+      <div className="detail-grid"><div><span>Location</span><strong>{selected!.location}</strong></div><div><span>First response</span><strong>{selected!.firstResponse}</strong></div><div><span>Sentiment</span><strong className={`sentiment ${selected!.sentiment.toLowerCase().replaceAll(' ', '-')}`}>{selected!.sentiment}</strong></div><div><span>Last seen</span><strong>Just now</strong></div></div>
+      <div className="context-section"><div className="section-title"><span>Tags</span><button className="text-button"><Plus size={13} /> Add</button></div><div className="tag-row">{selected!.tags.map((tag) => <span className="tag" key={tag}><Tag size={11} /> {tag}</span>)}</div></div>
+      <div className="context-section"><div className="section-title"><span>Handoff control</span><span className="live-label"><span className="live-pulse" /> Live</span></div><div className="control-card"><div className="control-line"><div className="control-icon blue"><Bot size={15} /></div><div><strong>AI handling</strong><span>{selected!.status === 'Agent controlled' ? 'Paused by agent' : selected!.status === 'Resolved' ? 'Thread resolved' : 'Active on this thread'}</span></div><div className={`toggle ${selected!.status !== 'Agent controlled' && selected!.status !== 'Resolved' ? 'on' : ''}`}><span /></div></div><div className="control-divider" /><div className="control-line"><div className="control-icon orange"><Headphones size={15} /></div><div><strong>Human handoff</strong><span>{selected!.status === 'Needs handoff' ? 'Recommended' : 'Available to team'}</span></div><button className="assign-button" onClick={() => updateSelectedStatus(selected!.status === 'Agent controlled' ? 'AI active' : 'Agent controlled', selected!.status === 'Agent controlled' ? 'Conversation returned to AI' : 'You took over the conversation')}>{selected!.status === 'Agent controlled' ? 'Return to AI' : 'Take over'}</button></div></div></div>
       <div className="context-footer"><ShieldCheck size={15} /><span>AI replies are restricted to approved workspace sources.</span></div>
-    </aside>
+    </aside>}
   </div>
 }
 
@@ -417,7 +657,7 @@ function ConversationPage({ path }: { path: string }) {
   return (
     <div className="conversation-page">
       <div className="thread-panel panel">
-        <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app'); window.dispatchEvent(new PopStateEvent('popstate')) }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><span className="contact-location">{conversation.location}</span></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
+        <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app') }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><span className="contact-location">{conversation.location}</span></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
         {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={takeOver}>Take over <ArrowUpRight size={14} /></button></div>}
         <div className="thread-body"><div className="date-divider"><span>Today</span></div>{conversation.messages.map((message, index) => <MessageBubble key={`${conversation.id}-${index}`} message={message} conversation={conversation} />)}<TypingIndicator /></div>
         <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea value={composer} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage() }} placeholder="Write a reply…" aria-label="Write a reply" /><div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file"><Paperclip size={16} /></button><button aria-label="Add emoji"><span className="emoji-dot">☺</span></button><span>External reply</span></div><button className="send-button" onClick={sendMessage}><Send size={15} /> Send reply</button></div></div>
@@ -525,6 +765,129 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
 
 function AnalyticsView() {
   return <div className="secondary-layout"><div className="section-toolbar"><div><span className="eyebrow compact">WEEKLY PULSE</span><h2>Support analytics</h2><p>Performance across 4 channels and 6 agents · Apr 11–17, 2024</p></div><div className="toolbar-actions"><button className="button button-secondary"><Clock3 size={15} /> Last 7 days <ChevronDown size={14} /></button><button className="button button-primary"><ArrowUpRight size={15} /> Export report</button></div></div><div className="analytics-grid"><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div></div>
+}
+
+const agentStatusLabel = (status: AgentStatus) => status === 'ready' ? 'Ready' : status === 'exhausted' ? 'Quota exhausted' : status === 'unconfigured' ? 'Needs API key' : 'Disabled'
+
+function AgentSelect({ agents, activeAgent, autoFallback, onAssign, onManage }: { agents: AiAgent[]; activeAgent: AiAgent | null; autoFallback: boolean; onAssign: (agentId: string) => void; onManage: () => void }) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      if (!target || !target.closest || target.closest('[data-agent-select]')) return
+      setOpen(false)
+    }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [open])
+
+  return (
+    <div className="agent-select" data-agent-select>
+      <button type="button" className="agent-select-trigger" onClick={() => setOpen(!open)}>
+        <Bot size={13} /><span className={`agent-dot ${activeAgent?.status ?? 'ready'}`} />{activeAgent?.name ?? 'Auto router'}<ChevronDown size={12} />
+      </button>
+      {open && <div className="agent-select-menu">
+        <div className="agent-select-label">AI AGENT FOR THIS THREAD</div>
+        {agents.map((agent) => <button key={agent.id} type="button" className={`agent-option ${agent.id === activeAgent?.id ? 'active' : ''}`} onClick={() => { onAssign(agent.id); setOpen(false) }}>
+          <span className={`agent-dot ${agent.status}`} />
+          <div><strong>{agent.name}</strong><span>{agent.model || 'no model'} · {agentStatusLabel(agent.status)}</span></div>
+        </button>)}
+        {agents.length === 0 && <div className="agent-select-empty">No enabled agents yet.</div>}
+        <button type="button" className="agent-select-manage" onClick={() => { onManage(); setOpen(false) }}><Settings2 size={12} /> Manage AI agents</button>
+        <div className="agent-select-hint">Auto-switch {autoFallback ? 'on' : 'off'} · fallback follows the priority chain</div>
+      </div>}
+    </div>
+  )
+}
+
+function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[]; autoFallback: boolean; saving: boolean; onSave: (agents: AgentDraft[], autoFallback: boolean) => void }) {
+  const [draft, setDraft] = useState<AgentDraft[]>(() => agents.map((agent) => ({ ...agent, apiKeyInput: '' })))
+  const [draftFallback, setDraftFallback] = useState(autoFallback)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    setDraft(agents.map((agent) => ({ ...agent, apiKeyInput: '' })))
+    setDraftFallback(autoFallback)
+    setDirty(false)
+  }, [agents, autoFallback])
+
+  const patchAgent = (id: string, patch: Partial<AgentDraft>) => {
+    setDirty(true)
+    setDraft((current) => current.map((agent) => agent.id === id ? { ...agent, ...patch } : agent))
+  }
+
+  const moveAgent = (index: number, delta: number) => {
+    setDirty(true)
+    setDraft((current) => {
+      const target = index + delta
+      if (target < 0 || target >= current.length) return current
+      const next = [...current]
+      const [moved] = next.splice(index, 1)
+      next.splice(target, 0, moved)
+      return next
+    })
+  }
+
+  const removeAgent = (id: string) => {
+    setDirty(true)
+    setDraft((current) => current.filter((agent) => agent.id !== id))
+  }
+
+  const addAgent = () => {
+    setDirty(true)
+    setDraft((current) => [...current, { id: `agent-${Date.now()}`, name: 'New agent', model: '', apiUrl: '', keyHint: '', apiKeyInput: '', enabled: true, status: 'unconfigured' }])
+  }
+
+  const enabledDraft = draft.filter((agent) => agent.enabled)
+  const readyCount = draft.filter((agent) => agent.enabled && agent.status === 'ready').length
+
+  return (
+    <div className="secondary-layout">
+      <div className="section-toolbar">
+        <div><span className="eyebrow compact">ROUTER LAYER</span><h2>AI agent router</h2><p>{enabledDraft.length} enabled of {draft.length} agents · the router fails over to the next agent when quota runs out.</p></div>
+        <div className="toolbar-actions"><button className="button button-secondary" onClick={addAgent}><Plus size={15} /> Add agent</button><button className="button button-primary" onClick={() => { onSave(draft, draftFallback); setDirty(false) }} disabled={saving}><Check size={15} /> {saving ? 'Saving…' : dirty ? 'Save settings' : 'Saved'}</button></div>
+      </div>
+      <div className="knowledge-overview">
+        <div className="knowledge-stat"><div className="knowledge-stat-icon blue"><Bot size={18} /></div><div><span>Enabled agents</span><strong>{enabledDraft.length}</strong><small>{draft.length} configured in the chain</small></div></div>
+        <div className="knowledge-stat"><div className="knowledge-stat-icon mint"><CheckCircle2 size={18} /></div><div><span>Ready now</span><strong>{readyCount}</strong><small>respond without hitting quota</small></div></div>
+        <div className="knowledge-stat"><div className="knowledge-stat-icon orange"><Zap size={18} /></div><div><span>Auto-switch</span><strong>{draftFallback ? 'On' : 'Off'}</strong><small>5 minute retry cooldown per agent</small></div></div>
+      </div>
+      <div className="agent-chain">
+        {draft.map((agent, index) => (
+          <div className={`agent-card ${agent.enabled ? '' : 'inactive'}`} key={agent.id}>
+            <div className="agent-rank">{index + 1}</div>
+            <div className="agent-card-main">
+              <div className="agent-card-head"><strong>{agent.name || `Agent ${index + 1}`}</strong><span className={`status-chip ${agent.status}`}>{agentStatusLabel(agent.status)}</span>{index === 0 && agent.enabled && <span className="primary-chip">Primary</span>}</div>
+              <div className="agent-fields">
+                <label>Name<input value={agent.name} onChange={(event) => patchAgent(agent.id, { name: event.target.value })} placeholder="e.g. GPT-5 mini" /></label>
+                <label>Model<input value={agent.model} onChange={(event) => patchAgent(agent.id, { model: event.target.value })} placeholder="e.g. gpt-5-mini" /></label>
+                <label>Base URL<input value={agent.apiUrl} onChange={(event) => patchAgent(agent.id, { apiUrl: event.target.value })} placeholder="https://api.openai.com/v1" /></label>
+                <label>API key<input type="password" value={agent.apiKeyInput ?? ''} onChange={(event) => patchAgent(agent.id, { apiKeyInput: event.target.value })} placeholder={agent.keyHint || 'write-only key'} autoComplete="new-password" /></label>
+              </div>
+            </div>
+            <div className="agent-card-actions">
+              <button type="button" className={`toggle ${agent.enabled ? 'on' : ''}`} aria-label={agent.enabled ? `Disable ${agent.name}` : `Enable ${agent.name}`} onClick={() => patchAgent(agent.id, { enabled: !agent.enabled })}><span /></button>
+              <button type="button" className="icon-mini" aria-label="Move up" disabled={index === 0} onClick={() => moveAgent(index, -1)}><ChevronUp size={14} /></button>
+              <button type="button" className="icon-mini" aria-label="Move down" disabled={index === draft.length - 1} onClick={() => moveAgent(index, 1)}><ChevronDown size={14} /></button>
+              <button type="button" className="icon-mini" aria-label="Remove agent" onClick={() => removeAgent(agent.id)}><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+        {draft.length === 0 && <div className="empty-state"><Bot size={26} /><strong>No AI agents yet</strong><span>Add an agent so the router has somewhere to send replies.</span></div>}
+      </div>
+      <div className="panel router-panel">
+        <div className="toggle-setting"><div><strong>Auto-switch when quota runs out</strong><span>On rate limit, quota error, or timeout the router moves to the next enabled agent in the chain.</span></div><button type="button" className={`toggle ${draftFallback ? 'on' : ''}`} aria-label="Toggle auto-switch" onClick={() => { setDirty(true); setDraftFallback((value) => !value) }}><span /></button></div>
+        <div className="router-order"><span>Fallback order</span><strong>{enabledDraft.map((agent) => agent.name || 'Untitled').join(' → ') || '—'}</strong></div>
+      </div>
+    </div>
+  )
 }
 
 function WidgetOverlay({ onClose }: { onClose: () => void }) {

@@ -1,8 +1,19 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createClient } from '@libsql/client'
-import { systemPrompt, HANDOFF_ACKNOWLEDGEMENT, OUT_OF_SCOPE_HANDOFF, HANDOFF_MARKER, isEscalationRequest, answerFromKnowledgeBase } from './knowledge-base.js'
+import { HANDOFF_ACKNOWLEDGEMENT, OUT_OF_SCOPE_HANDOFF, HANDOFF_MARKER, isEscalationRequest, answerFromKnowledgeBase } from './knowledge-base.js'
 import { registerWithEmailAndPassword, loginWithEmailAndPassword, googleConfigured, googleAuthUrl, exchangeGoogleCode, signSessionJwt } from './auth.js'
+import {
+  registerAgentsPersistence,
+  getAgentChainSnapshot,
+  getAutoFallback,
+  listAgents,
+  saveAgents,
+  agentsSummary,
+  callAgentWithRouter,
+  EXHAUSTED_COOLDOWN_MS,
+  type AgentConfig,
+} from './agents.js'
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 type Json = Record<string, unknown>
@@ -47,6 +58,8 @@ const ensureDatabase = async () => {
       await db.execute(`CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
       await db.execute(`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('user', 'assistant')), content TEXT NOT NULL, created_at TEXT NOT NULL)`)
       await db.execute(`CREATE TABLE IF NOT EXISTS conversation_status (conversation_id TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT, updated_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS ai_agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, model TEXT NOT NULL, api_url TEXT NOT NULL, api_key TEXT NOT NULL, enabled INTEGER NOT NULL, priority INTEGER NOT NULL, updated_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS ai_agent_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`)
       await db.execute(`CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at)`)
     })().catch((error) => {
       databaseSchema = null
@@ -56,6 +69,34 @@ const ensureDatabase = async () => {
   await databaseSchema
   return getDatabase()
 }
+
+// Persistensi konfigurasi AI agent (best-effort — database opsional).
+registerAgentsPersistence({
+  load: async () => {
+    const db = await ensureDatabase()
+    const rows = await db.execute('SELECT id, name, model, api_url, api_key, enabled FROM ai_agents ORDER BY priority ASC')
+    if (!rows.rows.length) return null
+    const setting = await db.execute({ sql: "SELECT value FROM ai_agent_settings WHERE key = 'auto_fallback'" })
+    const agents = rows.rows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+      model: String(row.model),
+      apiUrl: String(row.api_url),
+      apiKey: String(row.api_key),
+      enabled: Number(row.enabled) === 1,
+    })) satisfies AgentConfig[]
+    return { agents, autoFallback: setting.rows[0] ? String(setting.rows[0].value) !== 'false' : true }
+  },
+  save: async (agents, autoFallback) => {
+    const db = await ensureDatabase()
+    const now = new Date().toISOString()
+    await db.execute('DELETE FROM ai_agents')
+    for (const [index, agent] of agents.entries()) {
+      await db.execute({ sql: 'INSERT INTO ai_agents (id, name, model, api_url, api_key, enabled, priority, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', args: [agent.id, agent.name, agent.model, agent.apiUrl, agent.apiKey, agent.enabled ? 1 : 0, index, now] })
+    }
+    await db.execute({ sql: `INSERT INTO ai_agent_settings (key, value, updated_at) VALUES ('auto_fallback', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, args: [autoFallback ? 'true' : 'false', now] })
+  },
+})
 
 const databaseReady = async () => {
   try {
@@ -185,28 +226,8 @@ const readRawBody = async (request: IncomingMessage) => {
 
 const readBody = async (request: IncomingMessage) => readRawBody(request)
 
-const callLiveLlm = async (messages: ChatMessage[]) => {
-  const apiUrl = process.env.MANUS_API_URL
-  const apiKey = process.env.MANUS_API_KEY
-  if (!apiUrl || !apiKey) throw new Error('Managed LLM runtime is not configured')
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20_000)
-  try {
-    const response = await fetch(`${apiUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-5-mini', messages: [{ role: 'system', content: systemPrompt }, ...messages] }),
-      signal: controller.signal,
-    })
-    const payload = await response.json() as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> }
-    if (!response.ok || payload.error) throw new Error(payload.error?.message ?? `LLM request failed (${response.status})`)
-    const content = payload.choices?.[0]?.message?.content?.trim()
-    if (!content) throw new Error('LLM returned an empty response')
-    return content
-  } finally {
-    clearTimeout(timeout)
-  }
-}
+// Panggilan LLM dengan router fallback: agent utama → agent cadangan berikutnya.
+const callLiveLlm = async (messages: ChatMessage[]) => (await callAgentWithRouter(messages)).content
 
 const exchangeOAuthCode = async (code: string, redirectUri: string) => {
   const apiUrl = process.env.MANUS_OAUTH_API_URL
@@ -266,7 +287,7 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
     }
   }
 
-  if (method === 'GET' && url.pathname === '/api/health') return json(response, { ok: true, service: 'supportflow-web', status: 'operational', llm: Boolean(process.env.MANUS_API_URL && process.env.MANUS_API_KEY), auth: Boolean(process.env.MANUS_OAUTH_API_URL && process.env.MANUS_JWT_SECRET), database: await databaseReady(), whatsapp: whatsappConfigured() })
+  if (method === 'GET' && url.pathname === '/api/health') return json(response, { ok: true, service: 'supportflow-web', status: 'operational', llm: Boolean(process.env.MANUS_API_URL && process.env.MANUS_API_KEY), agents: agentsSummary().enabled, auth: Boolean(process.env.MANUS_OAUTH_API_URL && process.env.MANUS_JWT_SECRET), database: await databaseReady(), whatsapp: whatsappConfigured() })
   if (method === 'GET' && url.pathname === '/api/auth/session') {
     const identity = cookies[SESSION_COOKIE] ? verifyJwt(cookies[SESSION_COOKIE]) : null
     if (!identity) return json(response, { authenticated: false }, 401)
@@ -352,6 +373,45 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
     return response.end()
   }
 
+  // --- AI agent router (settings) -----------------------------------------
+  if (method === 'GET' && url.pathname === '/api/agents') {
+    const identity = cookies[SESSION_COOKIE] ? verifyJwt(cookies[SESSION_COOKIE]) : null
+    if (!identity) return json(response, { error: 'Authentication required' }, 401)
+    return json(response, { agents: await listAgents(), autoFallback: getAutoFallback(), cooldownMinutes: Math.round(EXHAUSTED_COOLDOWN_MS / 60_000) })
+  }
+  if (method === 'POST' && url.pathname === '/api/agents') {
+    const identity = cookies[SESSION_COOKIE] ? verifyJwt(cookies[SESSION_COOKIE]) : null
+    if (!identity) return json(response, { error: 'Authentication required' }, 401)
+    try {
+      const body = JSON.parse(await readBody(request)) as { agents?: unknown[]; autoFallback?: boolean }
+      if (!Array.isArray(body.agents)) return json(response, { error: 'agents must be an array' }, 400)
+      // API key bersifat write-only: kosong = pertahankan key tersimpan.
+      const existingKeys = new Map(getAgentChainSnapshot().agents.map((agent) => [agent.id, agent.apiKey]))
+      const sanitized: AgentConfig[] = []
+      for (const [index, raw] of body.agents.slice(0, 10).entries()) {
+        if (!raw || typeof raw !== 'object') continue
+        const entry = raw as Record<string, unknown>
+        const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+        if (!name) throw new Error(`Agent ${index + 1} needs a name`)
+        const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim().slice(0, 80) : `agent-${index + 1}`
+        const providedKey = typeof entry.apiKey === 'string' ? entry.apiKey.trim() : ''
+        sanitized.push({
+          id,
+          name: name.slice(0, 60),
+          model: typeof entry.model === 'string' ? entry.model.trim().slice(0, 80) : '',
+          apiUrl: typeof entry.apiUrl === 'string' ? entry.apiUrl.trim().slice(0, 300) : '',
+          apiKey: providedKey || existingKeys.get(id) || '',
+          enabled: entry.enabled !== false,
+        })
+      }
+      if (!sanitized.length) return json(response, { error: 'At least one agent is required' }, 400)
+      const persistenceMode = await saveAgents(sanitized, body.autoFallback !== false)
+      return json(response, { ok: true, persistence: persistenceMode, agents: await listAgents(), autoFallback: getAutoFallback() })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Invalid agent settings' }, 400)
+    }
+  }
+
   if (method === 'GET' && url.pathname === '/api/conversations') {
     try {
       const db = await ensureDatabase()
@@ -390,7 +450,7 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
   }
   if (method === 'POST' && url.pathname === '/api/chat/public') {
     try {
-      const body = JSON.parse(await readBody(request)) as { messages?: ChatMessage[]; conversationId?: string }
+      const body = JSON.parse(await readBody(request)) as { messages?: ChatMessage[]; conversationId?: string; agentId?: string }
       const messages = Array.isArray(body.messages) ? body.messages.filter((message) => message && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string').slice(-12) : []
       if (!messages.length || messages[messages.length - 1]?.role !== 'user') return json(response, { error: 'A user message is required' }, 400)
       const conversationId = body.conversationId ?? WIDGET_CONVERSATION_ID
@@ -404,12 +464,17 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
       const userRequestedHuman = isEscalationRequest(latestUserText)
       let message: string
       let conversationStatus: 'AI_ACTIVE' | 'HUMAN_HANDOFF' = 'AI_ACTIVE'
+      let routedAgent: { id: string; name: string; model: string } | null = null
+      let switchedFrom: string | null = null
       if (userRequestedHuman) {
         message = HANDOFF_ACKNOWLEDGEMENT
         conversationStatus = 'HUMAN_HANDOFF'
       } else {
         try {
-          message = await callLiveLlm(messages)
+          const routed = await callAgentWithRouter(messages, body.agentId)
+          message = routed.content
+          routedAgent = routed.agent
+          switchedFrom = routed.switchedFrom
         } catch {
           const kb = answerFromKnowledgeBase(latestUserText)
           if (!kb) {
@@ -428,7 +493,7 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
         try { await setConversationStatus(conversationId, 'HUMAN_HANDOFF', latestUserText.slice(0, 300)) } catch { /* status tracking is best-effort */ }
       }
       try { await persistMessage(conversationId, { role: 'assistant', content: message }); persistence = 'turso' } catch { /* keep the response available */ }
-      return json(response, { id: `msg_${Date.now()}`, status: conversationStatus, confidence: conversationStatus === 'HUMAN_HANDOFF' ? 1 : 0.9, citations: conversationStatus === 'HUMAN_HANDOFF' ? [] : ['Knowledge Base resmi'], conversationId, persistence, message })
+      return json(response, { id: `msg_${Date.now()}`, status: conversationStatus, confidence: conversationStatus === 'HUMAN_HANDOFF' ? 1 : 0.9, citations: conversationStatus === 'HUMAN_HANDOFF' ? [] : ['Knowledge Base resmi'], conversationId, persistence, message, agent: routedAgent, switchedFrom })
     } catch (error) {
       return json(response, { error: 'AI response unavailable', detail: error instanceof Error ? error.message : 'Unknown error' }, 502)
     }

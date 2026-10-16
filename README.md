@@ -8,6 +8,7 @@
 
 - **Inbox multi-kanal** — WhatsApp, Instagram, dan web chat dalam satu antrean percakapan.
 - **AI CS berbasis Knowledge Base** — jawaban digenerate LLM dengan system prompt yang dibangun dari `server/knowledge-base.js`; jika LLM tidak tersedia, ada mesin jawab deterministik dari Knowledge Base yang sama.
+- **AI agent router** — atur beberapa AI agent (model & endpoint berbeda) di menu **AI Agent** di sidebar, pilih agent per percakapan di Inbox, dan saat quota/rate limit habis router otomatis pindah ke agent berikutnya (gaya OpenRouter).
 - **Human handoff otomatis** — deteksi eskalasi di sisi server (pola regex) + marker `[[ESCALATE_TO_HUMAN]]` dari LLM, dengan status percakapan `AI | HUMAN_HANDOFF | RESOLVED`.
 - **Widget chat live di landing page** — bubble melayang di pojok kanan bawah yang terhubung ke `POST /api/chat/public`, dengan riwayat per-pengunjung (ID percakapan disimpan di localStorage) dan indikasi *human handoff*.
 - **Knowledge base editor, widget preview, dan analytics** di dalam dashboard.
@@ -89,6 +90,7 @@ turso db tokens create supportflow   # → TURSO_AUTH_TOKEN
 | Variabel | Fungsi |
 |---|---|
 | `MANUS_API_URL`, `MANUS_API_KEY` | LLM terkelola; jika kosong, jawaban memakai fallback Knowledge Base |
+| `AI_AGENTS` | JSON array multi-agent untuk router fallback, contoh: `[{"name":"Primary","model":"gpt-5-mini","apiUrl":"https://api.openai.com/v1","apiKey":"sk-…"}]` |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Login dengan Google (redirect URI: `http://localhost:3000/api/auth/google/callback`) |
 | `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_VERIFY_TOKEN` | Integrasi WhatsApp Cloud API |
 | `META_APP_SECRET` | Validasi signature webhook Meta |
@@ -158,7 +160,9 @@ uvicorn main:app --reload --port 8000
 | `GET /api/auth/providers` | Daftar metode login yang aktif |
 | `GET /api/auth/google/start` → `/api/auth/google/callback` | Login Google OAuth |
 | `GET /api/auth/start` → `/manus-oauth/callback` | Login Manus OAuth |
-| `POST /api/chat/public` | Kirim pesan ke AI CS (dengan status & confidence) |
+| `POST /api/chat/public` | Kirim pesan ke AI CS (dengan status, confidence, dan agent yang menjawab) |
+| `GET /api/agents` | Daftar AI agent + status router (khusus login) |
+| `POST /api/agents` | Simpan rantai agent & auto-switch (khusus login) |
 | `GET /api/chat/public/history` | Riwayat percakapan widget |
 | `GET /api/conversations` | Daftar percakapan + status (khusus sesi login) |
 | `POST /api/channels/whatsapp/send` | Kirim pesan WhatsApp keluar (butuh login) |

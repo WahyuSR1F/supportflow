@@ -39,20 +39,45 @@ Example response:
 
 ### `POST /api/chat/public`
 
-Send the latest widget conversation context to the managed LLM and persist the latest user/assistant turn in Turso.
+Send the latest widget conversation context to the AI agent router and persist the latest user/assistant turn in Turso.
 
 Request:
 
 ```json
 {
   "conversationId": "northstar-widget-demo",
+  "agentId": "primary",
   "messages": [
     { "role": "user", "content": "Can I change my delivery address?" }
   ]
 }
 ```
 
-Response includes `status`, `confidence`, `citations`, `conversationId`, `persistence` (`turso` or `unavailable`), and `message`.
+`agentId` is optional: it prefers one configured agent, and the router still fails over to the next agent in the chain when that agent hits quota, a rate limit, or a timeout.
+
+Response includes `status`, `confidence`, `citations`, `conversationId`, `persistence` (`turso` or `unavailable`), `message`, `agent` (`{ id, name, model }` of the agent that answered, or `null` for the Knowledge Base fallback), and `switchedFrom` (name of the preferred agent that was skipped, or `null`).
+
+## AI agent router
+
+The router keeps an ordered fallback chain of OpenAI-compatible agents (seeded from `AI_AGENTS` / `MANUS_API_URL`, persisted in Turso when configured). On HTTP 429/503, rate-limit, quota, or timeout errors the next enabled agent is tried automatically; exhausted agents cool down for 5 minutes.
+
+| Endpoint | Purpose | Auth |
+| --- | --- | --- |
+| `GET /api/agents` | List agents (API keys masked as `keyHint`), runtime `status` (`ready` \| `exhausted` \| `unconfigured` \| `disabled`), `autoFallback`, `cooldownMinutes` | Cookie |
+| `POST /api/agents` | Replace the chain: `{ "agents": [{ "id", "name", "model", "apiUrl", "apiKey", "enabled" }], "autoFallback": true }`. Empty `apiKey` keeps the stored key. Returns the refreshed list. | Cookie |
+
+Example `POST /api/agents` response:
+
+```json
+{
+  "ok": true,
+  "persistence": "turso",
+  "autoFallback": true,
+  "agents": [
+    { "id": "primary", "name": "Primary · Managed LLM", "model": "gpt-5-mini", "apiUrl": "https://llm.example.com", "keyHint": "••••4321", "enabled": true, "status": "ready" }
+  ]
+}
+```
 
 ### `GET /api/chat/public/history?conversationId=<id>`
 

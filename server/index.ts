@@ -62,7 +62,16 @@ const ensureDatabase = async () => {
       await db.execute(`CREATE TABLE IF NOT EXISTS ai_agent_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`)
       await db.execute(`CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, role TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', last_active TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
       await db.execute(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS knowledge_documents (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, size TEXT NOT NULL, status TEXT NOT NULL, chunks INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, created_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS agent_usage_daily (agent_id TEXT NOT NULL, date TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, requests INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (agent_id, date))`)
       await db.execute(`CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at)`)
+      await db.execute(`CREATE INDEX IF NOT EXISTS conversations_updated_idx ON conversations (updated_at)`)
+      await db.execute(`CREATE INDEX IF NOT EXISTS conversation_status_status_idx ON conversation_status (status)`)
+      await db.execute(`CREATE INDEX IF NOT EXISTS agent_usage_daily_date_idx ON agent_usage_daily (date)`)
+      // Migrasi kolom denormalisasi: preview inbox cukup 1 query (tanpa join N+1) → terasa cepat seperti WA.
+      for (const [column, ddl] of [['last_message', 'TEXT'], ['last_message_role', 'TEXT'], ['last_message_at', 'TEXT']] as const) {
+        try { await db.execute(`ALTER TABLE conversations ADD COLUMN ${column} ${ddl}`) } catch { /* kolom sudah ada */ }
+      }
     })().catch((error) => {
       databaseSchema = null
       throw error
@@ -98,6 +107,22 @@ registerAgentsPersistence({
     }
     await db.execute({ sql: `INSERT INTO ai_agent_settings (key, value, updated_at) VALUES ('auto_fallback', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, args: [autoFallback ? 'true' : 'false', now] })
   },
+  // Token usage per agent per hari → dasbor Analytics (fire-and-call dari router).
+  recordUsage: async (agentId, model, usage) => {
+    const db = await ensureDatabase()
+    const now = new Date().toISOString()
+    await db.execute({
+      sql: `INSERT INTO agent_usage_daily (agent_id, date, model, prompt_tokens, completion_tokens, requests, updated_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+            ON CONFLICT(agent_id, date) DO UPDATE SET
+              model = excluded.model,
+              prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+              completion_tokens = completion_tokens + excluded.completion_tokens,
+              requests = requests + 1,
+              updated_at = excluded.updated_at`,
+      args: [agentId, now.slice(0, 10), model, usage.promptTokens, usage.completionTokens, now],
+    })
+  },
 })
 
 const databaseReady = async () => {
@@ -114,14 +139,16 @@ const persistMessage = async (conversationId: string, message: StoredMessage) =>
   const db = await ensureDatabase()
   const now = new Date().toISOString()
   await db.execute({ sql: 'INSERT OR IGNORE INTO conversations (id, workspace_id, created_at, updated_at) VALUES (?, ?, ?, ?)', args: [conversationId, 'northstar-goods', now, now] })
-  await db.execute({ sql: 'UPDATE conversations SET updated_at = ? WHERE id = ?', args: [now, conversationId] })
   await db.execute({ sql: 'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)', args: [`${conversationId}:${Date.now()}:${randomBytes(5).toString('hex')}`, conversationId, message.role, message.content, now] })
+  // Preview denormalisasi → list inbox cukup SELECT conversations saja (satu baris, cepat).
+  await db.execute({ sql: 'UPDATE conversations SET updated_at = ?, last_message = ?, last_message_role = ?, last_message_at = ? WHERE id = ?', args: [now, message.content.slice(0, 400), message.role, now, conversationId] })
 }
 
-const loadHistory = async (conversationId: string) => {
+const loadHistory = async (conversationId: string, limit = 200) => {
   const db = await ensureDatabase()
-  const result = await db.execute({ sql: 'SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 80', args: [conversationId] })
-  return result.rows.map((row) => ({ role: String(row.role) as StoredMessage['role'], content: String(row.content) }))
+  const safeLimit = Math.min(Math.max(Number(limit) || 80, 1), 500)
+  const result = await db.execute({ sql: 'SELECT role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC LIMIT ?', args: [conversationId, safeLimit] })
+  return result.rows.map((row) => ({ role: String(row.role) as StoredMessage['role'], content: String(row.content), createdAt: String(row.created_at) }))
 }
 
 const setConversationStatus = async (conversationId: string, status: ConversationStatus, reason = '') => {
@@ -136,6 +163,30 @@ const getConversationStatus = async (conversationId: string): Promise<{ status: 
   const row = result.rows[0]
   if (!row) return null
   return { status: String(row.status) as ConversationStatus, reason: String(row.reason ?? '') }
+}
+
+// Knowledge base: dokumen workspace disimpan di database (seed sekali saat kosong).
+const KNOWLEDGE_SEED: Array<{ name: string; type: string; size: string; status: string; chunks: number }> = [
+  { name: 'Shipping & delivery policy.pdf', type: 'PDF', size: '1.2 MB', status: 'Indexed', chunks: 148 },
+  { name: 'Returns and exchanges.md', type: 'MD', size: '84 KB', status: 'Indexed', chunks: 62 },
+  { name: 'Product care guide.txt', type: 'TXT', size: '42 KB', status: 'Indexed', chunks: 31 },
+  { name: 'International shipping rates.pdf', type: 'PDF', size: '760 KB', status: 'Processing', chunks: 0 },
+]
+
+const knowledgeChunksFrom = (content: string, fallback: number) => {
+  const trimmed = content.trim()
+  if (!trimmed) return fallback
+  return Math.max(1, Math.ceil(trimmed.length / 400))
+}
+
+const ensureKnowledgeSeed = async (db: Awaited<ReturnType<typeof ensureDatabase>>) => {
+  const count = await db.execute('SELECT COUNT(*) AS total FROM knowledge_documents')
+  if (Number(count.rows[0]?.total ?? 0) > 0) return
+  const now = Date.now()
+  for (const [index, seed] of KNOWLEDGE_SEED.entries()) {
+    const updatedAt = new Date(now - (index + 1) * 3_600_000).toISOString()
+    await db.execute({ sql: 'INSERT INTO knowledge_documents (id, name, type, size, status, chunks, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', args: [`kb-${index + 1}`, seed.name, seed.type, seed.size, seed.status, seed.chunks, '', updatedAt, updatedAt] })
+  }
 }
 
 const whatsappConfigured = () => Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_VERIFY_TOKEN)
@@ -419,11 +470,20 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
       const db = await ensureDatabase()
       const statusRows = await db.execute('SELECT conversation_id, status, reason, updated_at FROM conversation_status')
       const statusMap = new Map(statusRows.rows.map((row) => [String(row.conversation_id), { status: String(row.status), reason: String(row.reason ?? ''), updatedAt: String(row.updated_at) }]))
-      const conversationRows = await db.execute('SELECT id, workspace_id, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 100')
+      const conversationRows = await db.execute('SELECT id, workspace_id, created_at, updated_at, last_message, last_message_role FROM conversations ORDER BY updated_at DESC LIMIT 100')
       const data = conversationRows.rows.map((row) => {
         const conversationId = String(row.id)
         const tracked = statusMap.get(conversationId)
-        return { id: conversationId, workspaceId: String(row.workspace_id), createdAt: String(row.created_at), updatedAt: String(row.updated_at), status: tracked?.status ?? 'AI', handoffReason: tracked?.reason ?? '' }
+        return {
+          id: conversationId,
+          workspaceId: String(row.workspace_id),
+          createdAt: String(row.created_at),
+          updatedAt: String(row.updated_at),
+          status: tracked?.status ?? 'AI',
+          handoffReason: tracked?.reason ?? '',
+          preview: row.last_message ? String(row.last_message) : '',
+          lastMessageRole: row.last_message_role ? String(row.last_message_role) : '',
+        }
       })
       return json(response, { data, meta: { tenant: 'northstar-goods', status: 'AI | HUMAN_HANDOFF | RESOLVED' } })
     } catch {
@@ -545,6 +605,168 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
       return json(response, { error: 'Overview unavailable', detail: error instanceof Error ? error.message : 'Database error' }, 503)
     }
   }
+  if (method === 'GET' && url.pathname === '/api/knowledge/documents') {
+    try {
+      const db = await ensureDatabase()
+      await ensureKnowledgeSeed(db)
+      const rows = await db.execute('SELECT id, name, type, size, status, chunks, updated_at FROM knowledge_documents ORDER BY updated_at DESC')
+      const documents = rows.rows.map((row) => ({ id: String(row.id), name: String(row.name), type: String(row.type), size: String(row.size), status: String(row.status), chunks: Number(row.chunks ?? 0), updatedAt: String(row.updated_at) }))
+      const stats = {
+        total: documents.length,
+        indexed: documents.filter((document) => document.status === 'Indexed').length,
+        chunks: documents.reduce((sum, document) => sum + document.chunks, 0),
+        lastSync: documents.reduce<string | null>((latest, document) => (!latest || document.updatedAt > latest ? document.updatedAt : latest), null),
+      }
+      return json(response, { documents, stats })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Knowledge base unavailable' }, 503)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/knowledge/documents') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { name?: string; content?: string }
+      const name = typeof body.name === 'string' ? body.name.trim().slice(0, 180) : ''
+      const content = typeof body.content === 'string' ? body.content.slice(0, 200_000) : ''
+      if (!name) return json(response, { error: 'Dokumen butuh nama file' }, 400)
+      if (!content.trim()) return json(response, { error: 'Konten dokumen wajib diisi' }, 400)
+      const db = await ensureDatabase()
+      const id = `kb-${randomBytes(8).toString('hex')}`
+      const now = new Date().toISOString()
+      const extension = name.includes('.') && name.split('.').pop() ? name.split('.').pop()!.toUpperCase().slice(0, 5) : ''
+      const type = extension || 'TXT'
+      const bytes = Buffer.byteLength(content, 'utf8')
+      const size = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
+      const chunks = knowledgeChunksFrom(content, 1)
+      await db.execute({ sql: 'INSERT INTO knowledge_documents (id, name, type, size, status, chunks, content, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', args: [id, name, type, size, 'Indexed', chunks, content, now, now] })
+      return json(response, { document: { id, name, type, size, status: 'Indexed', chunks, updatedAt: now } })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Gagal menambah dokumen' }, 500)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/knowledge/reindex') {
+    try {
+      const rawBody = await readBody(request)
+      const body = (rawBody ? JSON.parse(rawBody) : {}) as { id?: string }
+      const db = await ensureDatabase()
+      if (!body.id) await ensureKnowledgeSeed(db)
+      const rows = body.id
+        ? await db.execute({ sql: 'SELECT id, chunks, content FROM knowledge_documents WHERE id = ?', args: [body.id] })
+        : await db.execute('SELECT id, chunks, content FROM knowledge_documents')
+      if (!rows.rows.length) return json(response, { error: 'Dokumen tidak ditemukan' }, 404)
+      const now = new Date().toISOString()
+      for (const row of rows.rows) {
+        const chunks = knowledgeChunksFrom(String(row.content ?? ''), Number(row.chunks ?? 0))
+        await db.execute({ sql: "UPDATE knowledge_documents SET chunks = ?, status = 'Indexed', updated_at = ? WHERE id = ?", args: [chunks, now, String(row.id)] })
+      }
+      return json(response, { ok: true, count: rows.rows.length, lastSync: now })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Re-index gagal' }, 500)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/knowledge/documents/delete') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { id?: string }
+      if (!body.id) return json(response, { error: 'id is required' }, 400)
+      const db = await ensureDatabase()
+      const result = await db.execute({ sql: 'DELETE FROM knowledge_documents WHERE id = ?', args: [body.id] })
+      if (!result.rowsAffected) return json(response, { error: 'Dokumen tidak ditemukan' }, 404)
+      return json(response, { ok: true, id: body.id })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Gagal menghapus dokumen' }, 500)
+    }
+  }
+
+  // --- Inbox dashboard (percakapan nyata dari database) ---------------------
+  const requireSession = () => (cookies[SESSION_COOKIE] ? verifyJwt(cookies[SESSION_COOKIE]) : null)
+  const conversationIdFromPath = (prefix: string) => decodeURIComponent(url.pathname.slice(prefix.length)).replace(/\/+$/, '')
+
+  if (method === 'GET' && url.pathname.startsWith('/api/conversations/') && url.pathname.endsWith('/messages')) {
+    const conversationId = conversationIdFromPath('/api/conversations/').slice(0, -'/messages'.length)
+    if (!conversationId) return json(response, { error: 'conversationId is required' }, 400)
+    try {
+      const messages = await loadHistory(conversationId, Number(url.searchParams.get('limit') ?? 200))
+      return json(response, { conversationId, messages, persistence: 'turso' })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Messages unavailable' }, 503)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/conversations/messages') {
+    if (!requireSession()) return json(response, { error: 'Authentication required' }, 401)
+    try {
+      const body = JSON.parse(await readBody(request)) as { conversationId?: string; role?: string; content?: string }
+      const conversationId = typeof body.conversationId === 'string' ? body.conversationId.trim() : ''
+      const role = body.role === 'user' ? 'user' : 'assistant'
+      const content = typeof body.content === 'string' ? body.content.trim() : ''
+      if (!conversationId || !content) return json(response, { error: 'conversationId and content are required' }, 400)
+      if (content.length > 8000) return json(response, { error: 'content must be 8000 characters or fewer' }, 400)
+      await persistMessage(conversationId, { role, content })
+      return json(response, { ok: true, conversationId, persistence: 'turso' })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Failed to persist message' }, 500)
+    }
+  }
+  if (method === 'PATCH' && url.pathname.startsWith('/api/conversations/')) {
+    if (!requireSession()) return json(response, { error: 'Authentication required' }, 401)
+    const conversationId = conversationIdFromPath('/api/conversations/')
+    if (!conversationId) return json(response, { error: 'conversationId is required' }, 400)
+    try {
+      const body = JSON.parse(await readBody(request)) as { status?: string; reason?: string }
+      const status = body.status
+      if (status !== 'AI' && status !== 'HUMAN_HANDOFF' && status !== 'RESOLVED') {
+        return json(response, { error: 'status must be AI, HUMAN_HANDOFF, or RESOLVED' }, 400)
+      }
+      await setConversationStatus(conversationId, status, typeof body.reason === 'string' ? body.reason.slice(0, 300) : '')
+      return json(response, { ok: true, conversationId, status })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Failed to update status' }, 500)
+    }
+  }
+  if (method === 'DELETE' && url.pathname.startsWith('/api/conversations/')) {
+    if (!requireSession()) return json(response, { error: 'Authentication required' }, 401)
+    const conversationId = conversationIdFromPath('/api/conversations/')
+    if (!conversationId) return json(response, { error: 'conversationId is required' }, 400)
+    try {
+      const db = await ensureDatabase()
+      await db.execute({ sql: 'DELETE FROM messages WHERE conversation_id = ?', args: [conversationId] })
+      await db.execute({ sql: 'DELETE FROM conversation_status WHERE conversation_id = ?', args: [conversationId] })
+      await db.execute({ sql: 'DELETE FROM conversations WHERE id = ?', args: [conversationId] })
+      return json(response, { ok: true, conversationId })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Failed to delete conversation' }, 500)
+    }
+  }
+
+  // --- Token usage per AI agent (Analytics) ---------------------------------
+  if (method === 'GET' && url.pathname === '/api/agents/usage') {
+    if (!requireSession()) return json(response, { error: 'Authentication required' }, 401)
+    try {
+      const days = Math.min(Math.max(Number(url.searchParams.get('days') ?? 7), 1), 90)
+      const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10)
+      const db = await ensureDatabase()
+      const rows = await db.execute({ sql: 'SELECT agent_id, date, model, prompt_tokens, completion_tokens, requests FROM agent_usage_daily WHERE date >= ? ORDER BY date ASC', args: [since] })
+      const agents = await listAgents()
+      const nameById = new Map(agents.map((agent) => [agent.id, agent.name]))
+      const byAgent = new Map<string, { agentId: string; name: string; model: string; promptTokens: number; completionTokens: number; requests: number; days: Array<{ date: string; promptTokens: number; completionTokens: number; requests: number }> }>()
+      for (const row of rows.rows) {
+        const agentId = String(row.agent_id)
+        const entry = byAgent.get(agentId) ?? { agentId, name: nameById.get(agentId) ?? agentId, model: String(row.model ?? ''), promptTokens: 0, completionTokens: 0, requests: 0, days: [] }
+        entry.model = String(row.model ?? '') || entry.model
+        entry.promptTokens += Number(row.prompt_tokens ?? 0)
+        entry.completionTokens += Number(row.completion_tokens ?? 0)
+        entry.requests += Number(row.requests ?? 0)
+        entry.days.push({ date: String(row.date), promptTokens: Number(row.prompt_tokens ?? 0), completionTokens: Number(row.completion_tokens ?? 0), requests: Number(row.requests ?? 0) })
+        byAgent.set(agentId, entry)
+      }
+      // Agent tanpa pemakaian tetap ditampilkan (angka nol) agar tabel Analytics lengkap.
+      for (const agent of agents) {
+        if (!byAgent.has(agent.id)) byAgent.set(agent.id, { agentId: agent.id, name: agent.name, model: agent.model, promptTokens: 0, completionTokens: 0, requests: 0, days: [] })
+      }
+      return json(response, { since, days, agents: [...byAgent.values()] })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Usage unavailable' }, 503)
+    }
+  }
+
   if (method === 'GET' && url.pathname === '/api/team') {
     try {
       const db = await ensureDatabase()
@@ -563,6 +785,40 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
       await db.execute({ sql: 'INSERT INTO team_members (id, name, email, role, status, last_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', args: [id, body.name, body.email, body.role || 'agent', 'active', now, now, now] })
       return json(response, { ok: true, member: { id, name: body.name, email: body.email, role: body.role || 'agent', status: 'active', last_active: now } })
     } catch (e) { return json(response, { error: 'Failed to add member' }, 500) }
+  }
+  if (method === 'PATCH' && url.pathname.startsWith('/api/team/')) {
+    try {
+      const memberId = decodeURIComponent(url.pathname.slice('/api/team/'.length)).replace(/\/+$/, '')
+      if (!memberId) return json(response, { error: 'member id is required' }, 400)
+      const body = JSON.parse(await readBody(request)) as { name?: string; email?: string; role?: string; status?: string }
+      const db = await ensureDatabase()
+      const now = new Date().toISOString()
+      const sets: string[] = []
+      const args: Array<string | number> = []
+      if (typeof body.name === 'string' && body.name.trim()) { sets.push('name = ?'); args.push(body.name.trim()) }
+      if (typeof body.email === 'string' && body.email.trim()) { sets.push('email = ?'); args.push(body.email.trim()) }
+      if (typeof body.role === 'string' && body.role.trim()) { sets.push('role = ?'); args.push(body.role.trim()) }
+      if (body.status === 'active' || body.status === 'inactive') { sets.push('status = ?'); args.push(body.status) }
+      if (!sets.length) return json(response, { error: 'nothing to update' }, 400)
+      sets.push('updated_at = ?'); args.push(now)
+      const result = await db.execute({ sql: `UPDATE team_members SET ${sets.join(', ')} WHERE id = ?`, args: [...args, memberId] })
+      if (!result.rowsAffected) return json(response, { error: 'Member tidak ditemukan' }, 404)
+      return json(response, { ok: true, id: memberId })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Failed to update member' }, 500)
+    }
+  }
+  if (method === 'DELETE' && url.pathname.startsWith('/api/team/')) {
+    try {
+      const memberId = decodeURIComponent(url.pathname.slice('/api/team/'.length)).replace(/\/+$/, '')
+      if (!memberId) return json(response, { error: 'member id is required' }, 400)
+      const db = await ensureDatabase()
+      const result = await db.execute({ sql: 'DELETE FROM team_members WHERE id = ?', args: [memberId] })
+      if (!result.rowsAffected) return json(response, { error: 'Member tidak ditemukan' }, 404)
+      return json(response, { ok: true, id: memberId })
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Failed to delete member' }, 500)
+    }
   }
   if (method === 'GET' && url.pathname === '/api/settings') {
     try {

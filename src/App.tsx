@@ -103,6 +103,7 @@ type Conversation = {
   agentId?: string
   suggestion: string
   messages: Message[]
+  messagesLoaded?: boolean
 }
 
 type KnowledgeDocument = {
@@ -240,12 +241,77 @@ const initialConversations: Conversation[] = [
   },
 ]
 
-const initialDocuments: KnowledgeDocument[] = [
-  { name: 'Shipping & delivery policy.pdf', type: 'PDF', size: '1.2 MB', status: 'Indexed', updated: 'Today, 08:42', chunks: '148 chunks' },
-  { name: 'Returns and exchanges.md', type: 'MD', size: '84 KB', status: 'Indexed', updated: 'Yesterday, 17:20', chunks: '62 chunks' },
-  { name: 'Product care guide.txt', type: 'TXT', size: '42 KB', status: 'Indexed', updated: 'Sep 28, 12:16', chunks: '31 chunks' },
-  { name: 'International shipping rates.pdf', type: 'PDF', size: '760 KB', status: 'Processing', updated: 'Just now', chunks: '—' },
-]
+const AVATAR_CLASSES = ['avatar-coral', 'avatar-blue', 'avatar-lilac', 'avatar-mint', 'avatar-yellow']
+
+const channelFromId = (id: string): Channel =>
+  id.startsWith('whatsapp:') ? 'WhatsApp' : id.startsWith('instagram:') ? 'Instagram' : 'Web chat'
+
+const nameFromId = (id: string): string => {
+  if (id.startsWith('whatsapp:') || id.startsWith('instagram:')) {
+    const handle = id.split(':').slice(1).join(':')
+    return handle || id
+  }
+  return 'Web visitor'
+}
+
+const initialsOf = (name: string) => {
+  const parts = name.split(/[\s@._-]+/).filter(Boolean)
+  return (parts.slice(0, 2).map((part) => part[0]).join('') || 'W').toUpperCase()
+}
+
+const avatarForId = (id: string) => AVATAR_CLASSES[[...id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % AVATAR_CLASSES.length]
+
+const dbStatusToUi = (status: string, reason?: string): ConversationStatus =>
+  status === 'RESOLVED' ? 'Resolved'
+    : status === 'HUMAN_HANDOFF' ? (reason?.startsWith('agent') ? 'Agent controlled' : 'Needs handoff')
+      : 'AI active'
+
+const uiStatusToDb = (status: ConversationStatus): { status: 'AI' | 'HUMAN_HANDOFF' | 'RESOLVED'; reason: string } =>
+  status === 'Resolved' ? { status: 'RESOLVED', reason: '' }
+    : status === 'Agent controlled' ? { status: 'HUMAN_HANDOFF', reason: 'agent:takeover' }
+      : status === 'Needs handoff' ? { status: 'HUMAN_HANDOFF', reason: 'handoff:requested' }
+        : { status: 'AI', reason: '' }
+
+const timeLabel = (iso: string) => {
+  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (!Number.isFinite(minutes) || minutes < 1) return 'now'
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+const messageTimeLabel = (iso?: string) => {
+  const date = iso ? new Date(iso) : new Date()
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
+type ApiConversationRow = { id: string; updatedAt: string; status: string; handoffReason?: string; preview?: string; lastMessageRole?: string }
+
+const mapApiConversation = (row: ApiConversationRow): Conversation => {
+  const name = nameFromId(row.id)
+  return {
+    id: row.id,
+    name,
+    initials: initialsOf(name),
+    avatar: avatarForId(row.id),
+    channel: channelFromId(row.id),
+    preview: row.preview ?? '',
+    time: timeLabel(row.updatedAt),
+    unread: row.lastMessageRole === 'user' ? 1 : 0,
+    status: dbStatusToUi(row.status, row.handoffReason),
+    intent: '',
+    location: '—',
+    customerType: 'Customer',
+    tags: [],
+    confidence: 90,
+    sentiment: 'Neutral',
+    firstResponse: '—',
+    suggestion: DEFAULT_SUGGESTION,
+    messages: [],
+    messagesLoaded: false,
+  }
+}
 
 function ChannelIcon({ channel, small = false }: { channel: Channel; small?: boolean }) {
   const iconProps = { size: small ? 13 : 15, strokeWidth: 2.2 }
@@ -282,7 +348,6 @@ function DashboardApp() {
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav)
   const [collapsed, setCollapsed] = useState(false)
   const [conversations, setConversations] = useState(initialConversations)
-  const [documents, setDocuments] = useState(initialDocuments)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filter, setFilter] = useState<'All' | ConversationStatus>('All')
@@ -346,6 +411,40 @@ function DashboardApp() {
     }).catch(() => undefined)
     return () => { active = false }
   }, [])
+
+  // Muat daftar percakapan nyata dari database (fallback: data demo lokal saat API gagal).
+  useEffect(() => {
+    let active = true
+    fetch('/api/conversations').then(async (response) => {
+      if (!response.ok) throw new Error('inbox unavailable')
+      const payload = await response.json() as { data?: ApiConversationRow[] }
+      if (!active || !Array.isArray(payload.data)) return
+      setConversations(payload.data.map(mapApiConversation))
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
+
+  // Muat pesan thread saat dipilih (sekali per percakapan → terasa cepat seperti WA).
+  useEffect(() => {
+    if (!selectedId) return
+    const target = conversations.find((conversation) => conversation.id === selectedId)
+    if (!target || target.messagesLoaded) return
+    let active = true
+    fetch(`/api/conversations/${encodeURIComponent(selectedId)}/messages`).then(async (response) => {
+      if (!response.ok) throw new Error('messages unavailable')
+      const payload = await response.json() as { messages?: Array<{ role: string; content: string; createdAt?: string }> }
+      if (!active || !Array.isArray(payload.messages)) return
+      const mapped: Message[] = payload.messages.map((message) => ({
+        from: message.role === 'user' ? 'customer' : 'ai',
+        text: message.content,
+        time: messageTimeLabel(message.createdAt),
+      }))
+      setConversations((current) => current.map((conversation) => conversation.id === selectedId ? { ...conversation, messages: mapped, messagesLoaded: true } : conversation))
+    }).catch(() => {
+      if (active) setConversations((current) => current.map((conversation) => conversation.id === selectedId ? { ...conversation, messagesLoaded: true } : conversation))
+    })
+    return () => { active = false }
+  }, [selectedId, conversations])
 
   const assignAgent = (agentId: string) => {
     const agent = agents.find((item) => item.id === agentId)
@@ -437,7 +536,18 @@ function DashboardApp() {
     window.history.replaceState({}, '', route)
   }
 
+  const persistStatus = (conversationId: string, status: ConversationStatus) => {
+    if (conversationId.startsWith('new-')) return
+    const payload = uiStatusToDb(status)
+    fetch(`/api/conversations/${encodeURIComponent(conversationId)}/status`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => undefined)
+  }
+
   const updateSelectedStatus = (status: ConversationStatus, message: string) => {
+    if (selected) persistStatus(selected.id, status)
     setConversations((current) => current.map((conversation) => conversation.id === selected?.id ? { ...conversation, status } : conversation))
     setToast(message)
     window.setTimeout(() => setToast(''), 2400)
@@ -447,21 +557,45 @@ function DashboardApp() {
     if (!composer.trim() && !attachment) return
     const text = composer.trim()
     const attPreview = attachment?.type === 'image' ? attachment.url : attachment?.name || 'File attachment'
+    const targetId = selected?.id
     setConversations((current) => current.map((conversation) => conversation.id === selected?.id ? {
       ...conversation,
       status: 'Agent controlled',
       preview: text || attPreview,
       time: 'now',
-      messages: [...conversation.messages, { from: 'agent', text, time: '09:48', ...(attachment ? { attachment } : {}) }],
+      unread: 0,
+      messagesLoaded: true,
+      messages: [...conversation.messages, { from: 'agent', text, time: messageTimeLabel(), ...(attachment ? { attachment } : {}) }],
     } : conversation))
     setComposer('')
+    // Persist balasan agent ke database (fire-and-forget → UI tetap instan).
+    if (targetId && !targetId.startsWith('new-') && text) {
+      fetch('/api/conversations/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId: targetId, role: 'assistant', content: text }),
+      }).catch(() => undefined)
+      persistStatus(targetId, 'Agent controlled')
+    }
     setToast('Reply sent · AI paused for this thread')
     window.setTimeout(() => setToast(''), 2400)
   }
 
-  const addDocument = () => {
-    setDocuments((current) => [{ name: 'New support document.md', type: 'MD', size: 'Uploading…', status: 'Processing', updated: 'Just now', chunks: '—' }, ...current])
-    setToast('Document added to the indexing queue')
+  const handleThreadAction = (action: 'read' | 'archive' | 'delete') => {
+    const target = selected
+    if (!target) return
+    if (action === 'read') {
+      setConversations((current) => current.map((conversation) => conversation.id === target.id ? { ...conversation, unread: 0 } : conversation))
+      setToast('Conversation marked as read')
+      window.setTimeout(() => setToast(''), 2400)
+      return
+    }
+    setConversations((current) => current.filter((conversation) => conversation.id !== target.id))
+    setSelectedId(null)
+    if (!target.id.startsWith('new-')) {
+      fetch(`/api/conversations/${encodeURIComponent(target.id)}`, { method: 'DELETE' }).catch(() => undefined)
+    }
+    setToast(action === 'archive' ? 'Conversation archived' : 'Conversation deleted')
     window.setTimeout(() => setToast(''), 2400)
   }
 
@@ -510,9 +644,9 @@ function DashboardApp() {
             <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Overview' ? 'Ringkasan performa support & AI dalam 7 hari terakhir.' : activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : activeNav === 'Team' ? 'Kelola anggota tim support & role akses mereka.' : activeNav === 'Settings' ? 'Konfigurasi workspace, channel, notifikasi & integrasi.' : 'See how your support system is performing.'}</p></div>
           </div>}
 
-          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} /></div>}
+          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} onThreadAction={handleThreadAction} /></div>}
           {activeNav === 'Overview' && <OverviewView />}
-          {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
+          {activeNav === 'Knowledge base' && <KnowledgeView setToast={setToast} />}
           {activeNav === 'AI Agent' && <AgentsView agents={agents} autoFallback={autoFallback} saving={savingAgents} onSave={saveAgentSettings} />}
           {activeNav === 'Team' && <TeamView setToast={setToast} />}
           {activeNav === 'Settings' && <SettingsView setToast={setToast} />}
@@ -530,9 +664,9 @@ function NavButton({ icon, label, active, count, onClick }: { icon: React.ReactN
   return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span>{count && <em>{count}</em>}<span className="nav-tooltip" aria-hidden="true">{label}</span></button>
 }
 
-function ButtonDropdown({ actions, conversationId, onClose }: { actions: Array<{ label: string, onClick: () => void }>, conversationId: string, onClose: () => void }) {
+function ButtonDropdown({ actions, conversationId, onClose, up }: { actions: Array<{ label: string, onClick: () => void }>, conversationId: string, onClose: () => void, up?: boolean }) {
   return <div style={{ position: 'relative' }}>
-    <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: '4px', zIndex: 100, minWidth: '150px', background: '#fff', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,0.12)', padding: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+    <div style={{ position: 'absolute', right: 0, ...(up ? { bottom: '100%', marginBottom: '4px' } : { top: '100%', marginTop: '4px' }), zIndex: 100, minWidth: '150px', background: '#fff', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,0.12)', padding: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
       {actions.map((action, index) => <button key={index} onClick={(e: React.MouseEvent) => { e.stopPropagation(); action.onClick(); onClose() }} style={{ all: 'unset', width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: '9px', color: '#6e7670', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
         {action.label}
       </button>)}
@@ -544,7 +678,7 @@ function MetricCard({ label, value, trend, trendLabel, icon, tone }: { label: st
   return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small><b className={tone === 'orange' || tone === 'lilac' ? 'neutral-trend' : ''}>{trend}</b> {trendLabel}</small></div><ArrowUpRight className="metric-arrow" size={15} /></div>
 }
 
-function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, onNewConversation, agents, autoFallback, activeAgent, onAssignAgent, onRegenerate, regenerating, onManageAgents }: { selected: Conversation | null; conversations: Conversation[]; selectedId: string | null; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: (attachment?: Attachment | undefined) => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; onNewConversation?: () => void; agents: AiAgent[]; autoFallback: boolean; activeAgent: AiAgent | null; onAssignAgent: (agentId: string) => void; onRegenerate: () => void; regenerating: boolean; onManageAgents: () => void }) {
+function InboxView({ selected, conversations, selectedId, searchQuery, setSearchQuery, filter, setFilter, setSelectedId, composer, setComposer, sendMessage, updateSelectedStatus, setToast, onNewConversation, agents, autoFallback, activeAgent, onAssignAgent, onRegenerate, regenerating, onManageAgents, onThreadAction }: { selected: Conversation | null; conversations: Conversation[]; selectedId: string | null; searchQuery: string; setSearchQuery: (value: string) => void; filter: 'All' | ConversationStatus; setFilter: (value: 'All' | ConversationStatus) => void; setSelectedId: (value: string) => void; composer: string; setComposer: (value: string) => void; sendMessage: (attachment?: Attachment | undefined) => void; updateSelectedStatus: (status: ConversationStatus, message: string) => void; setToast: (value: string) => void; onNewConversation?: () => void; agents: AiAgent[]; autoFallback: boolean; activeAgent: AiAgent | null; onAssignAgent: (agentId: string) => void; onRegenerate: () => void; regenerating: boolean; onManageAgents: () => void; onThreadAction: (action: 'read' | 'archive' | 'delete') => void }) {
   const [activeThreadDropdown, setActiveThreadDropdown] = useState<string | null>(null)
   const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   const [attachment, setAttachment] = useState<{ name: string; url: string; type: string } | null>(null)
@@ -609,18 +743,9 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
     return () => window.removeEventListener('mousedown', closeFilterMenu)
   }, [filterMenuOpen])
 
-  function handleMarkAsRead() {
-    setToast('Conversation marked as read')
-    setActiveThreadDropdown(null)
-  }
-  function handleArchive() {
-    setToast('Conversation archived')
-    setActiveThreadDropdown(null)
-  }
-  function handleDelete() {
-    setToast('Conversation deleted')
-    setActiveThreadDropdown(null)
-  }
+  function handleMarkAsRead() { onThreadAction('read') }
+  function handleArchive() { onThreadAction('archive') }
+  function handleDelete() { onThreadAction('delete') }
 
   return <div className="inbox-layout">
     <section className="conversation-panel panel">
@@ -674,9 +799,10 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
 }
 
 function ConversationPage({ path }: { path: string }) {
-  const id = decodeURIComponent(path.split('/app/inbox/')[1] ?? 'mira')
-  const [conversations, setConversations] = useState(initialConversations)
-  const conversation = conversations.find((item) => item.id === id) ?? conversations[0]
+  const id = decodeURIComponent(path.split('/app/inbox/')[1] ?? '')
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [loadingThread, setLoadingThread] = useState(true)
+  const conversation = conversations.find((item) => item.id === id) ?? null
   const [composer, setComposer] = useState('')
   const [attachment, setAttachment] = useState<{ name: string; url: string; type: string } | null>(null)
   const [toast, setToast] = useState('')
@@ -685,6 +811,27 @@ function ConversationPage({ path }: { path: string }) {
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => { if (!composer && composerTextareaRef.current) composerTextareaRef.current.style.height = '' }, [composer])
+
+  // Muat thread dari database (list + pesan) → halaman deep-link selalu data terbaru.
+  useEffect(() => {
+    if (!id) { setLoadingThread(false); return }
+    let active = true
+    Promise.all([
+      fetch(`/api/conversations/${encodeURIComponent(id)}/messages`).then((response) => (response.ok ? response.json() as Promise<{ messages?: Array<{ role: string; content: string; createdAt?: string }> }> : { messages: [] })),
+      fetch('/api/conversations').then((response) => (response.ok ? response.json() as Promise<{ data?: ApiConversationRow[] }> : { data: [] })),
+    ]).then(([messagesPayload, listPayload]) => {
+      if (!active) return
+      const row = (listPayload.data ?? []).find((item) => item.id === id)
+      const base = row ? mapApiConversation(row) : mapApiConversation({ id, updatedAt: new Date().toISOString(), status: 'AI' })
+      const mapped: Message[] = (messagesPayload.messages ?? []).map((message) => ({
+        from: message.role === 'user' ? 'customer' : 'ai',
+        text: message.content,
+        time: messageTimeLabel(message.createdAt),
+      }))
+      setConversations([{ ...base, messages: mapped, messagesLoaded: true }])
+    }).catch(() => undefined).finally(() => { if (active) setLoadingThread(false) })
+    return () => { active = false }
+  }, [id])
 
   const pickFile = (file: File | undefined) => {
     if (!file) return
@@ -702,13 +849,25 @@ function ConversationPage({ path }: { path: string }) {
     if (!composer.trim() && !attachment) return
     const text = composer.trim()
     const attPreview = attachment?.type === 'image' ? attachment.url : attachment?.name || 'File attachment'
-    setConversations((current) => current.map((item) => item.id === conversation.id ? {
+    setConversations((current) => current.map((item) => item.id === conversation?.id ? {
       ...item,
       status: 'Agent controlled' as ConversationStatus,
       preview: text || attPreview,
       time: 'now',
-      messages: [...item.messages, { from: 'agent' as const, text, time: '09:48', ...(attachment ? { attachment: attachment as Attachment } : {}) }],
+      messages: [...item.messages, { from: 'agent' as const, text, time: messageTimeLabel(), ...(attachment ? { attachment: attachment as Attachment } : {}) }],
     } : item))
+    if (conversation && text) {
+      fetch('/api/conversations/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId: conversation.id, role: 'assistant', content: text }),
+      }).catch(() => undefined)
+      fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/status`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(uiStatusToDb('Agent controlled')),
+      }).catch(() => undefined)
+    }
     setComposer('')
     setAttachment(null)
     setToast('Reply sent · AI paused for this thread')
@@ -716,9 +875,24 @@ function ConversationPage({ path }: { path: string }) {
   }
 
   const takeOver = () => {
-    setConversations((current) => current.map((item) => item.id === conversation.id ? { ...item, status: 'Agent controlled' as ConversationStatus } : item))
+    setConversations((current) => current.map((item) => item.id === conversation?.id ? { ...item, status: 'Agent controlled' as ConversationStatus } : item))
+    if (conversation) {
+      fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/status`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(uiStatusToDb('Agent controlled')),
+      }).catch(() => undefined)
+    }
     setToast('You took over the conversation')
     window.setTimeout(() => setToast(''), 2400)
+  }
+
+  if (loadingThread) {
+    return <div className="auth-callback"><div className="auth-callback-card"><div className="auth-card-icon"><Sparkles size={18} /></div><h1>SupportFlow</h1><p>Memuat percakapan dari database…</p></div></div>
+  }
+
+  if (!conversation) {
+    return <div className="auth-callback"><div className="auth-callback-card"><div className="auth-card-icon"><Sparkles size={18} /></div><h1>SupportFlow</h1><p>Percakapan tidak ditemukan.</p><a className="button button-primary" href="/app/inbox">Kembali ke inbox</a></div></div>
   }
 
   return (
@@ -784,8 +958,117 @@ function KnowledgeSource({ label, score }: { label: string; score: string }) {
   return <div className="knowledge-source"><div className="source-doc"><FileText size={14} /></div><div><strong>{label}</strong><span>Relevant passage · {score}</span></div><ChevronRight size={14} /></div>
 }
 
-function KnowledgeView({ documents, addDocument, setToast }: { documents: KnowledgeDocument[]; addDocument: () => void; setToast: (value: string) => void }) {
-  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary" onClick={() => setToast('Index is healthy · last sync 2m ago')}><RefreshCw size={15} /> Re-index all</button><button className="button button-primary" onClick={addDocument}><UploadCloud size={15} /> Add document</button></div></div><div className="knowledge-overview"><div className="knowledge-stat"><div className="knowledge-stat-icon blue"><Database size={18} /></div><div><span>Indexed content</span><strong>241</strong><small>chunks available to AI</small></div></div><div className="knowledge-stat"><div className="knowledge-stat-icon mint"><CheckCircle2 size={18} /></div><div><span>Retrieval quality</span><strong>92.8%</strong><small>top-3 relevance score</small></div></div><div className="knowledge-stat"><div className="knowledge-stat-icon orange"><Clock3 size={18} /></div><div><span>Last sync</span><strong>2m ago</strong><small>all systems operational</small></div></div></div><div className="table-card panel"><div className="table-heading"><div><h3>Source documents</h3><span>Only approved workspace documents can ground an AI reply.</span></div><button className="icon-button subtle"><SlidersHorizontal size={17} /></button></div><div className="document-table"><div className="document-row document-head"><span>Name</span><span>Type</span><span>Updated</span><span>Chunks</span><span>Status</span><span /></div>{documents.map((document) => <div className="document-row" key={document.name}><div className="document-name"><div className="document-icon"><FileText size={16} /></div><div><strong>{document.name}</strong><span>{document.size}</span></div></div><span className="file-type">{document.type}</span><span>{document.updated}</span><span>{document.chunks}</span><span className={`index-status ${document.status.toLowerCase()}`}><span className="status-dot" /> {document.status}</span><button className="icon-button subtle" aria-label={`More actions for ${document.name}`}><MoreHorizontal size={17} /></button></div>)}</div></div></div>
+type KnowledgeStats = { total: number; indexed: number; chunks: number; lastSync: string | null }
+type KnowledgeRow = { id: string; name: string; type: string; size: string; status: string; chunks: number; updatedAt: string }
+
+function KnowledgeView({ setToast }: { setToast: (value: string) => void }) {
+  const [documents, setDocuments] = useState<KnowledgeRow[]>([])
+  const [stats, setStats] = useState<KnowledgeStats>({ total: 0, indexed: 0, chunks: 0, lastSync: null })
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [menuId, setMenuId] = useState<string | null>(null)
+  const [reindexing, setReindexing] = useState<string | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addContent, setAddContent] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [addError, setAddError] = useState('')
+
+  const flashToast = (message: string) => {
+    setToast(message)
+    window.setTimeout(() => setToast(''), 2400)
+  }
+
+  const load = async () => {
+    try {
+      setLoadError('')
+      const response = await fetch('/api/knowledge/documents')
+      if (!response.ok) throw new Error('Knowledge base tidak tersedia')
+      const payload = await response.json() as { documents: KnowledgeRow[]; stats: KnowledgeStats }
+      setDocuments(payload.documents)
+      setStats(payload.stats)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Knowledge base tidak tersedia')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void load() }, [])
+
+  const reindex = async (id?: string) => {
+    setMenuId(null)
+    setReindexing(id ?? 'all')
+    try {
+      const response = await fetch('/api/knowledge/reindex', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(id ? { id } : {}) })
+      if (!response.ok) throw new Error()
+      const result = await response.json() as { count: number }
+      flashToast(`Re-index selesai · ${result.count} dokumen`)
+      await load()
+    } catch {
+      flashToast('Re-index gagal')
+    } finally {
+      setReindexing(null)
+    }
+  }
+
+  const removeDocument = async (document: KnowledgeRow) => {
+    setMenuId(null)
+    try {
+      const response = await fetch('/api/knowledge/documents/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: document.id }) })
+      if (!response.ok) throw new Error()
+      flashToast(`Dokumen "${document.name}" dihapus`)
+      await load()
+    } catch {
+      flashToast('Gagal menghapus dokumen')
+    }
+  }
+
+  const submitAdd = async () => {
+    const name = addName.trim()
+    const content = addContent.trim()
+    if (!name) { setAddError('Nama file wajib diisi'); return }
+    if (!content) { setAddError('Konten dokumen wajib diisi — dipakai untuk chunking AI'); return }
+    setAdding(true)
+    setAddError('')
+    try {
+      const response = await fetch('/api/knowledge/documents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, content }) })
+      if (!response.ok) {
+        let message = 'Gagal menambah dokumen'
+        try { message = ((await response.json()) as { error?: string }).error ?? message } catch { /* keep default */ }
+        throw new Error(message)
+      }
+      flashToast(`Dokumen "${name}" ditambahkan & ter-index`)
+      setAddOpen(false)
+      setAddName('')
+      setAddContent('')
+      await load()
+    } catch (error) {
+      setAddError(error instanceof Error ? error.message : 'Gagal menambah dokumen')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  if (loading) return <div className="secondary-layout"><div className="empty-state"><strong>Memuat knowledge base…</strong><span>Mengambil dokumen dari database.</span></div></div>
+  if (loadError) return <div className="secondary-layout"><div className="empty-state"><strong>Gagal memuat knowledge base</strong><span>{loadError}</span><button className="button button-secondary" onClick={() => { setLoading(true); void load() }}>Coba lagi</button></div></div>
+
+  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary" disabled={reindexing !== null} onClick={() => void reindex()}><RefreshCw size={15} /> {reindexing === 'all' ? 'Re-indexing…' : 'Re-index all'}</button><button className="button button-primary" onClick={() => { setMenuId(null); setAddOpen((value) => !value) }}><UploadCloud size={15} /> Add document</button></div></div>
+    {addOpen && <div className="panel" style={{ padding: 16, marginBottom: 14 }}>
+      <div className="table-heading" style={{ borderBottom: 'none', padding: 0, marginBottom: 14 }}><div><h3>Tambah dokumen</h3><span>Konten di-chunk otomatis (±400 karakter/chunk) dan disimpan ke database.</span></div></div>
+      <div className="config-form" style={{ padding: 0 }}>
+        <label>Nama file<input value={addName} placeholder="shipping-policy.md" onChange={(event) => setAddName(event.target.value)} /></label>
+        <label>Konten dokumen<textarea value={addContent} style={{ height: 120 }} placeholder="Tempel isi dokumen di sini…" onChange={(event) => setAddContent(event.target.value)} /></label>
+        {addError && <p style={{ color: '#b4472e', fontSize: 9, margin: 0 }}>{addError}</p>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="button button-secondary" onClick={() => { setAddOpen(false); setAddError('') }}>Batal</button>
+          <button className="button button-primary" disabled={adding} onClick={() => void submitAdd()}>{adding ? 'Menyimpan…' : 'Upload & index'}</button>
+        </div>
+      </div>
+    </div>}
+    <div className="knowledge-overview"><div className="knowledge-stat"><div className="knowledge-stat-icon blue"><Database size={18} /></div><div><span>Indexed content</span><strong>{stats.chunks}</strong><small>chunks available to AI</small></div></div><div className="knowledge-stat"><div className="knowledge-stat-icon mint"><CheckCircle2 size={18} /></div><div><span>Documents indexed</span><strong>{stats.indexed}/{stats.total}</strong><small>dokumen berhasil ter-index</small></div></div><div className="knowledge-stat"><div className="knowledge-stat-icon orange"><Clock3 size={18} /></div><div><span>Last sync</span><strong>{stats.lastSync ? formatElapsed(stats.lastSync) : '—'}</strong><small>update terakhir dari database</small></div></div></div>
+    <div className="table-card panel"><div className="table-heading"><div><h3>Source documents</h3><span>Only approved workspace documents can ground an AI reply.</span></div><button className="icon-button subtle" aria-label="Refresh dokumen" onClick={() => void load()}><SlidersHorizontal size={17} /></button></div><div className="document-table"><div className="document-row document-head"><span>Name</span><span>Type</span><span>Updated</span><span>Chunks</span><span>Status</span><span /></div>{documents.length === 0 && <div className="document-row"><span>Belum ada dokumen — klik “Add document” untuk menambahkan.</span></div>}{documents.map((document, index) => <div className="document-row" key={document.id}><div className="document-name"><div className="document-icon"><FileText size={16} /></div><div><strong>{document.name}</strong><span>{document.size}</span></div></div><span className="file-type">{document.type}</span><span className="cell-muted">{formatElapsed(document.updatedAt)}</span><span>{document.chunks > 0 ? `${document.chunks} chunks` : '—'}</span><span className={`index-status ${reindexing === document.id ? 'processing' : document.status.toLowerCase()}`}><span className="status-dot" /> {reindexing === document.id ? 'Processing' : document.status}</span><span style={{ position: 'relative' }}><button className="icon-button subtle" aria-label={`More actions for ${document.name}`} onClick={() => setMenuId(menuId === document.id ? null : document.id)}><MoreHorizontal size={17} /></button>{menuId === document.id && <ButtonDropdown conversationId={document.id} up={index >= documents.length - 2} onClose={() => setMenuId(null)} actions={[{ label: 'Re-index dokumen', onClick: () => void reindex(document.id) }, { label: 'Hapus dokumen', onClick: () => void removeDocument(document) }]} />}</span></div>)}</div></div>
+  </div>
 }
 
 const WIDGET_EMBED_SNIPPET = [
@@ -805,6 +1088,8 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
   const [widgetMessage, setWidgetMessage] = useState('')
   const [widgetPending, setWidgetPending] = useState(false)
   const [widgetHandoff, setWidgetHandoff] = useState(false)
+  const [widgetConfig, setWidgetConfig] = useState({ name: 'Northstar concierge', welcome: 'Hi there — how can we help today?', accent: '#4263EB', handoffEnabled: true, showConfidence: true, collectContact: true })
+  const [savingConfig, setSavingConfig] = useState(false)
   const [widgetMessages, setWidgetMessages] = useState<WidgetChatMessage[]>(() => {
     try {
       const stored = window.localStorage.getItem('supportflow-widget-history')
@@ -869,6 +1154,40 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
     }
   }
 
+  // Konfigurasi widget disimpan di tabel settings (key: widget) → persist antar perangkat.
+  useEffect(() => {
+    let active = true
+    fetch('/api/settings').then(async (response) => {
+      if (!response.ok) return
+      const payload = await response.json() as { settings?: Record<string, string> }
+      const raw = payload.settings?.widget
+      if (!active || !raw) return
+      try {
+        const parsed = JSON.parse(raw) as Partial<typeof widgetConfig>
+        setWidgetConfig((current) => ({ ...current, ...parsed }))
+      } catch { /* format lama diabaikan */ }
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
+
+  const saveWidgetConfig = async () => {
+    setSavingConfig(true)
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ settings: { widget: JSON.stringify(widgetConfig) } }),
+      })
+      if (!response.ok) throw new Error('save failed')
+      setToast('Widget settings saved ke database')
+    } catch {
+      setToast('Gagal menyimpan widget settings')
+    } finally {
+      setSavingConfig(false)
+      window.setTimeout(() => setToast(''), 2400)
+    }
+  }
+
   const copyEmbedCode = async () => {
     try {
       await navigator.clipboard.writeText(WIDGET_EMBED_SNIPPET)
@@ -878,7 +1197,7 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
     }
   }
 
-  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary" onClick={copyEmbedCode}><Copy size={15} /> Copy embed code</button>            <button className="button button-primary" onClick={() => setWidgetOpen(!widgetOpen)}><Eye size={15} /> Preview widget</button></div></div><div className="widget-layout"><div className="widget-config panel"><div className="table-heading"><div><h3>Widget configuration</h3><span>Give visitors a clear path to a helpful answer.</span></div><div className="configured-pill"><Check size={13} /> Published</div></div><div className="config-form"><label>Widget name<input defaultValue="Northstar concierge" /></label><label>Welcome message<textarea defaultValue="Hi there — how can we help today?" /></label><div className="config-split"><label>Accent color<div className="color-input"><span className="color-swatch" /> #4263EB <ChevronDown size={14} /></div></label><label>Human handoff<div className="select-input">Enabled <ChevronDown size={14} /></div></label></div><div className="toggle-setting"><div><strong>Show AI confidence</strong><span>Let agents see the grounding signal before sending.</span></div><div className="toggle on"><span /></div></div><div className="toggle-setting"><div><strong>Collect contact details</strong><span>Ask for email when the visitor requests a human.</span></div><div className="toggle on"><span /></div></div><button className="button button-primary full" onClick={() => setToast('Widget settings saved')}>Save widget settings</button></div></div><div className="widget-preview-card panel"><div className="preview-label"><span><MonitorDot /> Live preview</span><span className="preview-status"><span className="live-pulse" /> Published</span></div><div className="browser-frame"><div className="browser-top"><span /><span /><span /><small>northstar-goods.com</small></div><div className="browser-page"><div className="fake-site-nav"><strong>SupportFlow</strong><span>Inbox</span><span>Knowledge</span><span>Widget</span><span>Analytics</span></div><div className="preview-dashboard"><div className="preview-dash-header"><div><strong>Dashboard utama</strong><span>Ringkasan operasional hari ini</span></div><span className="preview-pill">Live</span></div><div className="preview-stats"><div className="preview-stat"><span>Conversations</span><strong>1,284</strong><small>+12% vs kemarin</small></div><div className="preview-stat"><span>AI Resolved</span><strong>72.4%</strong><small>Target 70%</small></div><div className="preview-stat"><span>Handoff</span><strong>186</strong><small>Butuh tindak lanjut</small></div><div className="preview-stat"><span>Avg Response</span><strong>28s</strong><small>Dalam target</small></div></div><div className="preview-activity"><strong>Aktivitas terbaru</strong><div className="preview-activity-item"><span className="pa-dot blue" /><div><span>Pesan baru dari WhatsApp</span><small>1 menit lalu</small></div></div><div className="preview-activity-item"><span className="pa-dot mint" /><div><span>AI berhasil menyelesaikan tiket</span><small>5 menit lalu</small></div></div><div className="preview-activity-item"><span className="pa-dot orange" /><div><span>Dihubungkan ke CS (handoff)</span><small>12 menit lalu</small></div></div></div></div><div className="widget-launcher" onClick={() => setWidgetOpen(!widgetOpen)}><MessageCircle size={20} /></div>{widgetOpen && <div className="widget-mini"><div className="widget-mini-head"><div className="widget-logo"><Sparkles size={14} /></div><div><strong>Northstar concierge</strong><span>{widgetHandoff ? 'Terhubung ke tim Customer Service' : 'Usually replies instantly'}</span></div><button onClick={() => setWidgetOpen(false)}>×</button></div><div className="widget-mini-body" aria-live="polite">{widgetMessages.map((message, index) => <div className={`mini-chat ${message.role === 'user' ? 'outgoing' : 'incoming'}`} key={`${message.role}-${index}`}>{message.content}</div>)}{widgetPending && <div className="typing-indicator"><span /><span /><span /><em>AI is typing…</em></div>}</div><div className="widget-mini-input"><input value={widgetMessage} onChange={(event) => setWidgetMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendWidgetMessage() }} placeholder={widgetPending ? 'AI is typing…' : 'Write a message…'} aria-label="Widget message" disabled={widgetPending} /><button onClick={() => void sendWidgetMessage()} aria-label="Send widget message" disabled={widgetPending}><Send size={14} /></button></div></div>}</div></div></div></div><div className="install-card panel">
+  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary" onClick={copyEmbedCode}><Copy size={15} /> Copy embed code</button>            <button className="button button-primary" onClick={() => setWidgetOpen(!widgetOpen)}><Eye size={15} /> Preview widget</button></div></div><div className="widget-layout"><div className="widget-config panel"><div className="table-heading"><div><h3>Widget configuration</h3><span>Give visitors a clear path to a helpful answer.</span></div><div className="configured-pill"><Check size={13} /> Published</div></div><div className="config-form"><label>Widget name<input value={widgetConfig.name} onChange={(event) => setWidgetConfig((current) => ({ ...current, name: event.target.value }))} /></label><label>Welcome message<textarea value={widgetConfig.welcome} onChange={(event) => setWidgetConfig((current) => ({ ...current, welcome: event.target.value }))} /></label><div className="config-split"><label>Accent color<div className="color-input"><input type="color" value={widgetConfig.accent} onChange={(event) => setWidgetConfig((current) => ({ ...current, accent: event.target.value }))} style={{ width: 28, height: 22, border: 'none', background: 'transparent', cursor: 'pointer' }} /> {widgetConfig.accent.toUpperCase()}</div></label><label>Human handoff<div className="select-input">{widgetConfig.handoffEnabled ? 'Enabled' : 'Disabled'} <ChevronDown size={14} /></div></label></div><div className="toggle-setting"><div><strong>Show AI confidence</strong><span>Let agents see the grounding signal before sending.</span></div><div className={`toggle ${widgetConfig.showConfidence ? 'on' : ''}`} onClick={() => setWidgetConfig((current) => ({ ...current, showConfidence: !current.showConfidence }))} role="switch" aria-checked={widgetConfig.showConfidence} tabIndex={0}><span /></div></div><div className="toggle-setting"><div><strong>Collect contact details</strong><span>Ask for email when the visitor requests a human.</span></div><div className={`toggle ${widgetConfig.collectContact ? 'on' : ''}`} onClick={() => setWidgetConfig((current) => ({ ...current, collectContact: !current.collectContact }))} role="switch" aria-checked={widgetConfig.collectContact} tabIndex={0}><span /></div></div><button className="button button-primary full" disabled={savingConfig} onClick={() => void saveWidgetConfig()}>{savingConfig ? 'Saving…' : 'Save widget settings'}</button></div></div><div className="widget-preview-card panel"><div className="preview-label"><span><MonitorDot /> Live preview</span><span className="preview-status"><span className="live-pulse" /> Published</span></div><div className="browser-frame"><div className="browser-top"><span /><span /><span /><small>northstar-goods.com</small></div><div className="browser-page"><div className="fake-site-nav"><strong>SupportFlow</strong><span>Inbox</span><span>Knowledge</span><span>Widget</span><span>Analytics</span></div><div className="preview-dashboard"><div className="preview-dash-header"><div><strong>Dashboard utama</strong><span>Ringkasan operasional hari ini</span></div><span className="preview-pill">Live</span></div><div className="preview-stats"><div className="preview-stat"><span>Conversations</span><strong>1,284</strong><small>+12% vs kemarin</small></div><div className="preview-stat"><span>AI Resolved</span><strong>72.4%</strong><small>Target 70%</small></div><div className="preview-stat"><span>Handoff</span><strong>186</strong><small>Butuh tindak lanjut</small></div><div className="preview-stat"><span>Avg Response</span><strong>28s</strong><small>Dalam target</small></div></div><div className="preview-activity"><strong>Aktivitas terbaru</strong><div className="preview-activity-item"><span className="pa-dot blue" /><div><span>Pesan baru dari WhatsApp</span><small>1 menit lalu</small></div></div><div className="preview-activity-item"><span className="pa-dot mint" /><div><span>AI berhasil menyelesaikan tiket</span><small>5 menit lalu</small></div></div><div className="preview-activity-item"><span className="pa-dot orange" /><div><span>Dihubungkan ke CS (handoff)</span><small>12 menit lalu</small></div></div></div></div><div className="widget-launcher" onClick={() => setWidgetOpen(!widgetOpen)}><MessageCircle size={20} /></div>{widgetOpen && <div className="widget-mini"><div className="widget-mini-head"><div className="widget-logo"><Sparkles size={14} /></div><div><strong>Northstar concierge</strong><span>{widgetHandoff ? 'Terhubung ke tim Customer Service' : 'Usually replies instantly'}</span></div><button onClick={() => setWidgetOpen(false)}>×</button></div><div className="widget-mini-body" aria-live="polite">{widgetMessages.map((message, index) => <div className={`mini-chat ${message.role === 'user' ? 'outgoing' : 'incoming'}`} key={`${message.role}-${index}`}>{message.content}</div>)}{widgetPending && <div className="typing-indicator"><span /><span /><span /><em>AI is typing…</em></div>}</div><div className="widget-mini-input"><input value={widgetMessage} onChange={(event) => setWidgetMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendWidgetMessage() }} placeholder={widgetPending ? 'AI is typing…' : 'Write a message…'} aria-label="Widget message" disabled={widgetPending} /><button onClick={() => void sendWidgetMessage()} aria-label="Send widget message" disabled={widgetPending}><Send size={14} /></button></div></div>}</div></div></div></div><div className="install-card panel">
         <div className="table-heading"><div><h3>Pasang widget di aplikasi lain</h3><span>Tempel snippet ini ke halaman HTML aplikasi kamu — launcher widget muncul di pojok kanan bawah.</span></div><button className="button button-secondary small" onClick={copyEmbedCode}><Copy size={14} /> Salin kode</button></div>
         <div className="install-body">
           <ol className="install-steps">
@@ -976,61 +1295,101 @@ function OverviewView() {
       </div>
     </div>
 }function AnalyticsView({ agents }: { agents: AiAgent[] }) {
-  const tokenRows = agents.map((agent, idx) => {
-    const base = 40000 + idx * 25000
-    const prompt = Math.floor(base * 0.7)
-    const completion = Math.floor(base * 0.3)
-    const requests = 120 + idx * 40
-    const total = prompt + completion
-    const avg = requests > 0 ? Math.round(total / requests) : 0
-    const cost = (total / 1000000) * 0.002
-    const reports = Math.max(0, Math.floor((idx + 1) * 6 - (idx % 2) * 4))
-    const repClass = reports >= 20 ? 'bad' : reports >= 10 ? 'warn' : 'ok'
-    return { agent, prompt, completion, total, requests, avg, cost, reports, repClass }
-  })
+  const [usage, setUsage] = useState<{ since: string; days: number; agents: Array<{ agentId: string; name: string; model: string; promptTokens: number; completionTokens: number; requests: number }> } | null>(null)
+  const [overview, setOverview] = useState<OverviewData | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [loading, setLoading] = useState(true)
 
-  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary"><Clock3 size={15} /> Last 7 days <ChevronDown size={14} /></button><button className="button button-primary"><ArrowUpRight size={15} /> Export report</button></div></div><div className="analytics-grid"><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div>
-      <div className="table-card panel" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
-        <div className="table-heading">
-          <div><h3>Token usage per AI agent</h3><span>Breakdown token usage & report count per AI agent yang digunakan</span></div>
-        </div>
-        <div className="document-table wide">
-          <div className="document-row document-head">
-            <span>AI Agent</span>
-            <span>Model</span>
-            <span>Provider</span>
-            <span>Prompt tokens</span>
-            <span>Completion tokens</span>
-            <span>Total tokens</span>
-            <span>Requests</span>
-            <span>Avg. tokens/req</span>
-            <span>Reports</span>
-            <span>Cost (est.)</span>
-          </div>
-          {tokenRows.length === 0 && (
-            <div className="document-row" style={{ gridTemplateColumns: '1fr', color: '#717773', justifyContent: 'center' }}>
-              <span>Belum ada AI agent yang ditambahkan. Tambah agent di menu Agents untuk melihat token usage.</span>
-            </div>
-          )}
-          {tokenRows.map(({ agent, prompt, completion, total, requests, avg, cost, reports, repClass }, idx) => (
-            <div className="document-row" key={agent.id || idx}>
-              <div className="document-name"><strong>{agent.name}</strong></div>
-              <span>{agent.model || '-'}</span>
-              <span>{(agent as any).provider || '-'}</span>
-              <span>{prompt.toLocaleString()}</span>
-              <span>{completion.toLocaleString()}</span>
-              <span>{total.toLocaleString()}</span>
-              <span>{requests.toLocaleString()}</span>
-              <span>{avg.toLocaleString()}</span>
-              <span><span className={`report-badge ${repClass}`}>{reports}</span></span>
-              <span>${cost.toFixed(4)}</span>
-            </div>
-          ))}
-        </div>
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      fetch('/api/agents/usage?days=7').then((response) => (response.ok ? response.json() : null)),
+      fetch('/api/overview').then((response) => (response.ok ? response.json() : null)),
+    ]).then(([usagePayload, overviewPayload]) => {
+      if (!active) return
+      setUsage(usagePayload)
+      setOverview(overviewPayload)
+      if (!usagePayload && !overviewPayload) setLoadError('Data analytics tidak tersedia')
+    }).catch(() => { if (active) setLoadError('Data analytics tidak tersedia') }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  if (loading) return <div className="secondary-layout"><div className="empty-state"><strong>Memuat analytics…</strong><span>Mengambil token usage & data percakapan dari database.</span></div></div>
+  if (loadError && !usage && !overview) return <div className="secondary-layout"><div className="empty-state"><strong>Gagal memuat analytics</strong><span>{loadError}</span></div></div>
+
+  const knownIds = new Set((usage?.agents ?? []).map((row) => row.agentId))
+  const rows = [
+    ...(usage?.agents ?? []),
+    ...agents.filter((agent) => !knownIds.has(agent.id)).map((agent) => ({ agentId: agent.id, name: agent.name, model: agent.model, promptTokens: 0, completionTokens: 0, requests: 0 })),
+  ]
+  const totals = rows.reduce((sum, row) => ({ prompt: sum.prompt + row.promptTokens, completion: sum.completion + row.completionTokens, requests: sum.requests + row.requests }), { prompt: 0, completion: 0, requests: 0 })
+  const totalTokens = totals.prompt + totals.completion
+  const totalCost = (totalTokens / 1_000_000) * 2
+
+  const series = overview?.series ?? []
+  const maxVolume = Math.max(1, ...series.map((day) => day.incoming))
+  const totalConversations = overview?.total ?? 0
+  const handoff = overview?.statusCounts.HUMAN_HANDOFF ?? 0
+  const resolvedCount = overview?.statusCounts.RESOLVED ?? 0
+  const aiResolvedPercent = overview?.aiResolvedPercent ?? 0
+
+  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary"><Clock3 size={15} /> Last {usage?.days ?? 7} days <ChevronDown size={14} /></button></div></div>
+    <div className="analytics-grid">
+      <div className="chart-card panel">
+        <div className="chart-heading"><div><h3>Conversation volume</h3><span>{totalConversations.toLocaleString()} total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div>
+        {series.length === 0
+          ? <div className="empty-state"><strong>Belum ada percakapan</strong><span>Graph muncul setelah chat masuk ke database.</span></div>
+          : <div className="chart-area"><div className="y-labels">{[0, 1, 2, 3, 4].map((step) => <span key={step}>{Math.round((maxVolume * (4 - step)) / 4)}</span>)}</div><div className="bars">{series.map((day) => <div className="bar-group" key={day.date}><div className="bar-stack"><span className="bar incoming" style={{ height: `${day.incoming === 0 ? 0 : Math.max(8, (day.incoming / maxVolume) * 100)}%` }} /><span className="bar resolved" style={{ height: `${day.resolved === 0 ? 0 : Math.max(8, (day.resolved / maxVolume) * 100)}%` }} /></div><small>{day.label}</small></div>)}</div></div>}
+      </div>
+      <div className="performance-card panel">
+        <div className="chart-heading"><div><h3>AI performance</h3><span>Last {usage?.days ?? 7} days · live dari database</span></div><Sparkles size={18} color="#4263eb" /></div>
+        <div className="performance-score"><strong>{aiResolvedPercent}%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: `${Math.min(100, aiResolvedPercent)}%` }} /></div></div>
+        <div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>{resolvedCount.toLocaleString()}</strong></div>
+        <div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>{handoff.toLocaleString()}</strong></div>
+        <div className="performance-row"><span><span className="signal-dot gray" /> Total LLM requests</span><strong>{totals.requests.toLocaleString()}</strong></div>
       </div>
     </div>
+    <div className="table-card panel" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
+      <div className="table-heading">
+        <div><h3>Token usage per AI agent</h3><span>Real usage dari tabel agent_usage_daily · sejak {usage?.since ?? '—'} · est. cost ${totalCost.toFixed(4)}</span></div>
+      </div>
+      <div className="document-table wide">
+        <div className="document-row document-head">
+          <span>AI Agent</span>
+          <span>Model</span>
+          <span>Prompt tokens</span>
+          <span>Completion tokens</span>
+          <span>Total tokens</span>
+          <span>Requests</span>
+          <span>Avg. tokens/req</span>
+          <span>Cost (est.)</span>
+        </div>
+        {rows.length === 0 && (
+          <div className="document-row" style={{ gridTemplateColumns: '1fr', color: '#717773', justifyContent: 'center' }}>
+            <span>Belum ada AI agent yang ditambahkan. Tambah agent di menu Agents untuk melihat token usage.</span>
+          </div>
+        )}
+        {rows.map((row, idx) => {
+          const total = row.promptTokens + row.completionTokens
+          const avg = row.requests > 0 ? Math.round(total / row.requests) : 0
+          const rowCost = (total / 1_000_000) * 2
+          return (
+            <div className="document-row" key={row.agentId || idx}>
+              <div className="document-name"><strong>{row.name}</strong></div>
+              <span>{row.model || '-'}</span>
+              <span>{row.promptTokens.toLocaleString()}</span>
+              <span>{row.completionTokens.toLocaleString()}</span>
+              <span>{total.toLocaleString()}</span>
+              <span>{row.requests.toLocaleString()}</span>
+              <span>{avg.toLocaleString()}</span>
+              <span>${rowCost.toFixed(4)}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  </div>
 }
-
 const agentStatusLabel = (status: AgentStatus) => status === 'ready' ? 'Ready' : status === 'exhausted' ? 'Quota exhausted' : status === 'unconfigured' ? 'Needs API key' : 'Disabled'
 
 function AgentSelect({ agents, activeAgent, autoFallback, onAssign, onManage }: { agents: AiAgent[]; activeAgent: AiAgent | null; autoFallback: boolean; onAssign: (agentId: string) => void; onManage: () => void }) {
@@ -1182,6 +1541,17 @@ function TeamView({ setToast }: { setToast: (value: string) => void }) {
     } catch { setToast('Gagal menambahkan anggota') }
   }
 
+  const removeMember = async (id: string, name: string) => {
+    if (!window.confirm(`Hapus anggota "${name}" dari tim?`)) return
+    try {
+      const res = await fetch(`/api/team/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (res.ok) {
+        setMembers((current) => current.filter((member) => member.id !== id))
+        setToast('Anggota tim dihapus')
+      } else setToast('Gagal menghapus anggota')
+    } catch { setToast('Gagal menghapus anggota') }
+  }
+
   return (
     <div className="secondary-layout">
       <div className="section-toolbar actions-only">
@@ -1199,7 +1569,7 @@ function TeamView({ setToast }: { setToast: (value: string) => void }) {
           {loading && <div className="document-row"><span>Memuat...</span></div>}
           {!loading && members.length === 0 && <div className="document-row"><span>Belum ada anggota tim</span></div>}
           {members.map((m) => (
-            <div className="document-row" key={m.id}><div className="document-name"><strong>{m.name}</strong></div><span>{m.email}</span><span>{m.role}</span><span>{m.status||'active'}</span><span>{m.last_active||'-'}</span><button className="icon-button subtle"><MoreHorizontal size={17}/></button></div>
+            <div className="document-row" key={m.id}><div className="document-name"><strong>{m.name}</strong></div><span>{m.email}</span><span>{m.role}</span><span>{m.status||'active'}</span><span>{m.last_active||'-'}</span><button className="icon-button subtle" aria-label={`Hapus ${m.name}`} onClick={() => void removeMember(m.id, m.name)}><Trash2 size={16}/></button></div>
           ))}
         </div>
       </div>

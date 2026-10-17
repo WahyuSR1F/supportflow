@@ -430,6 +430,121 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
       return json(response, { data: [], meta: { tenant: 'northstar-goods', status: 'AI | HUMAN_HANDOFF | RESOLVED' } })
     }
   }
+  if (method === 'GET' && url.pathname === '/api/overview') {
+    try {
+      const db = await ensureDatabase()
+      const conversationRows = await db.execute('SELECT id, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 500')
+      const statusRows = await db.execute('SELECT conversation_id, status, updated_at FROM conversation_status')
+      const messageRows = await db.execute('SELECT conversation_id, role, content, created_at FROM messages ORDER BY created_at ASC LIMIT 4000')
+
+      const statusMap = new Map(statusRows.rows.map((row) => [String(row.conversation_id), { status: String(row.status), updatedAt: String(row.updated_at) }]))
+      const messagesByConversation = new Map<string, Array<{ role: string; content: string; createdAt: string }>>()
+      for (const row of messageRows.rows) {
+        const conversationId = String(row.conversation_id)
+        const list = messagesByConversation.get(conversationId) ?? []
+        list.push({ role: String(row.role), content: String(row.content), createdAt: String(row.created_at) })
+        messagesByConversation.set(conversationId, list)
+      }
+
+      const nowMs = Date.now()
+      const DAY_MS = 86_400_000
+      const dayKey = (value: string | number | Date) => new Date(value).toISOString().slice(0, 10)
+      const inWindow = (value: string, daysBack: number) => {
+        const timestamp = new Date(value).getTime()
+        const threshold = nowMs - daysBack * DAY_MS
+        return timestamp >= threshold
+      }
+
+      // Derive channel from conversation id prefix (no channel column exists).
+      const channelOf = (conversationId: string): 'WhatsApp' | 'Instagram' | 'Web chat' =>
+        conversationId.startsWith('whatsapp:') ? 'WhatsApp' : conversationId.startsWith('instagram:') ? 'Instagram' : 'Web chat'
+      const nameOf = (conversationId: string): string => {
+        if (conversationId.startsWith('whatsapp:') || conversationId.startsWith('instagram:')) return `${conversationId.split(':')[1] ?? conversationId}`
+        return 'Web visitor'
+      }
+
+      const statusCounts: Record<string, number> = { AI: 0, HUMAN_HANDOFF: 0, RESOLVED: 0 }
+      const channels: Record<'WhatsApp' | 'Instagram' | 'Web chat', number> = { WhatsApp: 0, Instagram: 0, 'Web chat': 0 }
+      const createdDaily = new Map<string, number>()
+      for (const row of conversationRows.rows) {
+        const conversationId = String(row.id)
+        const status = statusMap.get(conversationId)?.status ?? 'AI'
+        statusCounts[status] = (statusCounts[status] ?? 0) + 1
+        channels[channelOf(conversationId)] += 1
+        const key = dayKey(String(row.created_at))
+        createdDaily.set(key, (createdDaily.get(key) ?? 0) + 1)
+      }
+
+      const resolvedDaily = new Map<string, number>()
+      for (const [, value] of statusMap) {
+        if (value.status !== 'RESOLVED') continue
+        const key = dayKey(value.updatedAt)
+        resolvedDaily.set(key, (resolvedDaily.get(key) ?? 0) + 1)
+      }
+
+      const series: Array<{ date: string; label: string; incoming: number; resolved: number }> = []
+      for (let offset = 6; offset >= 0; offset -= 1) {
+        const date = new Date(nowMs - offset * DAY_MS)
+        const key = dayKey(date)
+        series.push({ date: key, label: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getUTCDay()], incoming: createdDaily.get(key) ?? 0, resolved: resolvedDaily.get(key) ?? 0 })
+      }
+
+      // Unread = percakapan yang pesan terakhirnya dari pengguna (belum ada balasan).
+      const unread: Array<{ id: string; name: string; channel: string; preview: string; time: string; unread: number; status: string }> = []
+      let responseTimesMs = 0
+      let responseTimesCount = 0
+      for (const row of conversationRows.rows) {
+        const conversationId = String(row.id)
+        const messages = messagesByConversation.get(conversationId) ?? []
+        const last = messages[messages.length - 1]
+        if (last?.role === 'user') {
+          let trailing = 0
+          for (let index = messages.length - 1; index >= 0 && messages[index].role === 'user'; index -= 1) trailing += 1
+          const statusKey = statusMap.get(conversationId)?.status ?? 'AI'
+          unread.push({
+            id: conversationId,
+            name: nameOf(conversationId),
+            channel: channelOf(conversationId),
+            preview: last.content.slice(0, 160),
+            time: String(row.updated_at),
+            unread: trailing,
+            status: statusKey === 'HUMAN_HANDOFF' ? 'Needs handoff' : statusKey === 'RESOLVED' ? 'Resolved' : 'AI active',
+          })
+        }
+        for (let index = 1; index < messages.length; index += 1) {
+          const previous = messages[index - 1]
+          const current = messages[index]
+          if (previous.role === 'user' && current.role === 'assistant') {
+            const gap = new Date(current.createdAt).getTime() - new Date(previous.createdAt).getTime()
+            if (gap >= 0 && gap <= 10 * 60_000) { responseTimesMs += gap; responseTimesCount += 1 }
+          }
+        }
+      }
+      unread.sort((a, b) => (a.time < b.time ? 1 : -1))
+
+      const seriesIncoming = series.reduce((sum, day) => sum + day.incoming, 0)
+      const prevIncoming = [...createdDaily.entries()].reduce((sum, [key, count]) => {
+        const age = (nowMs - new Date(`${key}T23:59:59.999Z`).getTime()) / DAY_MS
+        return age > 7 && age <= 14 ? sum + count : sum
+      }, 0)
+      const trendPercent = prevIncoming > 0 ? Math.round(((seriesIncoming - prevIncoming) / prevIncoming) * 100) : null
+
+      return json(response, {
+        meta: { source: 'turso', generatedAt: new Date().toISOString() },
+        total: conversationRows.rows.length,
+        statusCounts,
+        unanswered: unread.length,
+        avgResponseSeconds: responseTimesCount > 0 ? Math.round(responseTimesMs / responseTimesCount / 1000) : null,
+        aiResolvedPercent: conversationRows.rows.length > 0 ? Math.round((statusCounts.RESOLVED / conversationRows.rows.length) * 1000) / 10 : 0,
+        trendPercent,
+        series,
+        channels,
+        unread: unread.slice(0, 50),
+      })
+    } catch (error) {
+      return json(response, { error: 'Overview unavailable', detail: error instanceof Error ? error.message : 'Database error' }, 503)
+    }
+  }
   if (method === 'GET' && url.pathname === '/api/team') {
     try {
       const db = await ensureDatabase()

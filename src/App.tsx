@@ -511,7 +511,7 @@ function DashboardApp() {
           </div>}
 
           {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} /></div>}
-          {activeNav === 'Overview' && <OverviewView unreadConversations={initialConversations.filter(c => c.unread > 0)} />}
+          {activeNav === 'Overview' && <OverviewView />}
           {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
           {activeNav === 'AI Agent' && <AgentsView agents={agents} autoFallback={autoFallback} saving={savingAgents} onSave={saveAgentSettings} />}
           {activeNav === 'Team' && <TeamView setToast={setToast} />}
@@ -894,22 +894,82 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
     </div>
 }
 
-function OverviewView({ unreadConversations = [] }: { unreadConversations?: Conversation[] }) {
-  return <div className="secondary-layout"><div className="metric-row"><MetricCard label="Total conversations" value="1,284" trend="+12%" trendLabel="vs last week" icon={<MessageCircle size={19} />} tone="blue" /><MetricCard label="Chat yang diarahkan" value="186" trend="-8%" trendLabel="vs last week" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Chat yang belum dibalas" value="24" trend="-12%" trendLabel="vs last week" icon={<Clock3 size={19} />} tone="purple" /><MetricCard label="AI resolved" value="72.4%" trend="+6.2%" trendLabel="vs last week" icon={<Sparkles size={19} />} tone="mint" /><MetricCard label="Needs handoff" value="186" trend="-8%" trendLabel="vs last week" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Avg. response time" value="28s" trend="-14%" trendLabel="vs last week" icon={<Clock3 size={19} />} tone="lilac" /></div><div className="analytics-grid" style={{ marginTop: '16px' }}><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div>
+type OverviewUnreadRow = { id: string; name: string; channel: Channel; preview: string; time: string; unread: number; status: ConversationStatus }
+
+type OverviewData = {
+  meta: { source: string; generatedAt: string }
+  total: number
+  statusCounts: Record<string, number>
+  unanswered: number
+  avgResponseSeconds: number | null
+  aiResolvedPercent: number
+  trendPercent: number | null
+  series: Array<{ date: string; label: string; incoming: number; resolved: number }>
+  channels: Record<Channel, number>
+  unread: OverviewUnreadRow[]
+}
+
+const formatElapsed = (iso: string) => {
+  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (!Number.isFinite(minutes) || minutes < 1) return 'baru saja'
+  if (minutes < 60) return `${minutes}m lalu`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}j lalu`
+  return `${Math.floor(hours / 24)}h lalu`
+}
+
+function OverviewView() {
+  const [data, setData] = useState<OverviewData | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/overview')
+      .then((response) => {
+        if (!response.ok) throw new Error('Overview tidak tersedia')
+        return response.json() as Promise<OverviewData>
+      })
+      .then((payload) => setData(payload))
+      .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : 'Overview tidak tersedia'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="secondary-layout"><div className="empty-state"><strong>Memuat overview…</strong><span>Mengambil data terbaru dari database.</span></div></div>
+  if (loadError || !data) return <div className="secondary-layout"><div className="empty-state"><strong>Gagal memuat overview</strong><span>{loadError || 'Database tidak tersedia'}</span></div></div>
+
+  const handoff = data.statusCounts.HUMAN_HANDOFF ?? 0
+  const resolvedCount = data.statusCounts.RESOLVED ?? 0
+  const unresolved = Math.max(0, data.total - resolvedCount - handoff)
+  const trendValue = data.trendPercent == null ? '–' : `${data.trendPercent > 0 ? '+' : ''}${data.trendPercent}%`
+  const trendLabel = data.trendPercent == null ? 'periode berjalan' : 'vs last week'
+  const averageResponse = data.avgResponseSeconds == null ? '–' : `${data.avgResponseSeconds}s`
+  const maxVolume = Math.max(1, ...data.series.map((day) => day.incoming))
+  const yTicks = [0, 1, 2, 3, 4].map((step) => Math.round((maxVolume * (4 - step)) / 4))
+  const waCount = data.channels['WhatsApp'] ?? 0
+  const igCount = data.channels['Instagram'] ?? 0
+  const webCount = data.channels['Web chat'] ?? 0
+  const channelTotal = Math.max(1, waCount + igCount + webCount)
+  const waPercent = (waCount / channelTotal) * 100
+  const igPercent = (igCount / channelTotal) * 100
+  const webPercent = 100 - waPercent - igPercent
+  const donutStyle = { background: `conic-gradient(var(--blue) 0 ${waPercent}%, #a686dc ${waPercent}% ${waPercent + igPercent}%, #8dd8ba ${waPercent + igPercent}% 100%)` }
+  const rounded = (value: number) => Math.round(value)
+
+  return <div className="secondary-layout"><div className="metric-row"><MetricCard label="Total conversations" value={data.total.toLocaleString()} trend={trendValue} trendLabel={trendLabel} icon={<MessageCircle size={19} />} tone="blue" /><MetricCard label="Chat yang diarahkan" value={String(handoff)} trend="–" trendLabel="periode berjalan" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Chat yang belum dibalas" value={String(data.unanswered)} trend="–" trendLabel="periode berjalan" icon={<Clock3 size={19} />} tone="purple" /><MetricCard label="AI resolved" value={`${data.aiResolvedPercent}%`} trend="–" trendLabel="periode berjalan" icon={<Sparkles size={19} />} tone="mint" /><MetricCard label="Needs handoff" value={String(handoff)} trend="–" trendLabel="periode berjalan" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Avg. response time" value={averageResponse} trend="–" trendLabel="periode berjalan" icon={<Clock3 size={19} />} tone="lilac" /></div><div className="analytics-grid" style={{ marginTop: '16px' }}><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>{data.total} total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels">{yTicks.map((tick, index) => <span key={index}>{tick}</span>)}</div><div className="bars">{data.series.map((day) => <div className="bar-group" key={day.date}><div className="bar-stack"><span className="bar incoming" style={{ height: `${day.incoming === 0 ? 0 : Math.max(8, (day.incoming / maxVolume) * 100)}%` }} /><span className="bar resolved" style={{ height: `${day.resolved === 0 ? 0 : Math.max(8, (day.resolved / maxVolume) * 100)}%` }} /></div><small>{day.label}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Live dari database</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>{data.aiResolvedPercent}%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: `${Math.min(100, data.aiResolvedPercent)}%` }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>{resolvedCount}</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>{handoff}</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>{unresolved}</strong></div></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut" style={donutStyle}><div>{data.total}<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>{rounded(waPercent)}%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>{rounded(igPercent)}%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>{rounded(webPercent)}%</b></span></div></div></div></div>
       <div className="table-card panel" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
         <div className="table-heading"><div><h3>Pesan yang belum dibaca</h3><span>Chat dengan pesan belum dibaca</span></div></div>
         <div className="document-table">
           <div className="document-row document-head"><span>Pelanggan</span><span>Channel</span><span>Pesan terakhir</span><span>Waktu</span><span>Unread</span><span>Status</span><span>Aksi</span></div>
-          {unreadConversations.length === 0 && <div className="document-row"><span>Tidak ada pesan yang belum dibaca</span></div>}
-          {unreadConversations.map((c) => (
-            <div className="document-row" key={c.id}>
-              <div className="document-name"><Avatar conversation={c} size="sm" /><div><strong>{c.name}</strong><span>{c.intent}</span></div></div>
-              <span><span className={`channel-label ${c.channel.toLowerCase().replace(/\s+/g, '-')} push-left`}><ChannelIcon channel={c.channel} small /> {c.channel}</span></span>
-              <span className="cell-ellipsis">{c.preview}</span>
-              <span className="cell-muted">{c.time}</span>
-              <span><span className="unread-pill">{c.unread}</span></span>
-              <span><span className={`status-badge ${c.status.toLowerCase().replaceAll(' ', '-')}`}><span className="status-dot" />{c.status}</span></span>
-              <span><button className="button button-secondary small" onClick={() => { window.location.assign(`/app/inbox/${c.id}`); }}>Buka</button></span>
+          {data.unread.length === 0 && <div className="document-row"><span>Tidak ada pesan yang belum dibaca</span></div>}
+          {data.unread.map((row) => (
+            <div className="document-row" key={row.id}>
+              <div className="document-name"><div className="avatar avatar-sm avatar-blue">{row.name.slice(0, 2).toUpperCase()}</div><div><strong>{row.name}</strong><span>{row.channel}</span></div></div>
+              <span><span className={`channel-label ${row.channel.toLowerCase().replace(/\s+/g, '-')} push-left`}><ChannelIcon channel={row.channel} small /> {row.channel}</span></span>
+              <span className="cell-ellipsis">{row.preview}</span>
+              <span className="cell-muted">{formatElapsed(row.time)}</span>
+              <span><span className="unread-pill">{row.unread}</span></span>
+              <span><span className={`status-badge ${row.status.toLowerCase().replaceAll(' ', '-')}`}><span className="status-dot" />{row.status}</span></span>
+              <span><button className="button button-secondary small" onClick={() => { window.location.assign(`/app/inbox/${encodeURIComponent(row.id)}`) }}>Buka</button></span>
             </div>
           ))}
         </div>

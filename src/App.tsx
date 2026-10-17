@@ -902,7 +902,15 @@ function OverviewView({ unreadConversations = [] }: { unreadConversations?: Conv
           <div className="document-row document-head"><span>Pelanggan</span><span>Channel</span><span>Pesan terakhir</span><span>Waktu</span><span>Unread</span><span>Status</span><span>Aksi</span></div>
           {unreadConversations.length === 0 && <div className="document-row"><span>Tidak ada pesan yang belum dibaca</span></div>}
           {unreadConversations.map((c) => (
-            <div className="document-row" key={c.id}><div className="document-name"><strong>{c.name}</strong></div><span>{c.channel}</span><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{c.preview}</span><span>{c.time}</span><span>{c.unread}</span><span>{c.status}</span><button className="button button-secondary small" onClick={() => { window.location.assign(`/app/inbox/${c.id}`); }}>Buka</button></div>
+            <div className="document-row" key={c.id}>
+              <div className="document-name"><Avatar conversation={c} size="sm" /><div><strong>{c.name}</strong><span>{c.intent}</span></div></div>
+              <span><span className={`channel-label ${c.channel.toLowerCase().replace(/\s+/g, '-')} push-left`}><ChannelIcon channel={c.channel} small /> {c.channel}</span></span>
+              <span className="cell-ellipsis">{c.preview}</span>
+              <span className="cell-muted">{c.time}</span>
+              <span><span className="unread-pill">{c.unread}</span></span>
+              <span><span className={`status-badge ${c.status.toLowerCase().replaceAll(' ', '-')}`}><span className="status-dot" />{c.status}</span></span>
+              <span><button className="button button-secondary small" onClick={() => { window.location.assign(`/app/inbox/${c.id}`); }}>Buka</button></span>
+            </div>
           ))}
         </div>
       </div>
@@ -926,7 +934,7 @@ function OverviewView({ unreadConversations = [] }: { unreadConversations?: Conv
         <div className="table-heading">
           <div><h3>Token usage per AI agent</h3><span>Breakdown token usage & report count per AI agent yang digunakan</span></div>
         </div>
-        <div className="document-table">
+        <div className="document-table wide">
           <div className="document-row document-head">
             <span>AI Agent</span>
             <span>Model</span>

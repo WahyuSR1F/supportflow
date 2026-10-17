@@ -47,7 +47,7 @@ import {
 import { AuthCallbackPage, AuthPage, LandingPage } from './Marketing'
 import './styles.css'
 
-type NavItem = 'Overview' | 'Inbox' | 'Knowledge base' | 'Widget' | 'Analytics' | 'AI Agent'
+type NavItem = 'Overview' | 'Inbox' | 'Knowledge base' | 'Widget' | 'Analytics' | 'AI Agent' | 'Team' | 'Settings'
 type AgentStatus = 'ready' | 'exhausted' | 'unconfigured' | 'disabled'
 
 type AiAgent = {
@@ -489,8 +489,8 @@ function DashboardApp() {
           <NavButton icon={<BarChart3 size={17} />} label="Analytics" active={activeNav === 'Analytics'} onClick={() => navigate('Analytics')} />
           <div className="nav-label nav-label-spaced">Manage</div>
           <NavButton icon={<Bot size={17} />} label="AI Agent" active={activeNav === 'AI Agent'} count={String(agents.filter((agent) => agent.enabled).length)} onClick={() => navigate('AI Agent')} />
-          <NavButton icon={<UsersRound size={17} />} label="Team" onClick={() => setToast('Team settings are coming next')} />
-          <NavButton icon={<Settings2 size={17} />} label="Settings" onClick={() => setToast('Settings are coming next')} />
+          <NavButton icon={<UsersRound size={17} />} label="Team" active={activeNav === 'Team'} onClick={() => navigate('Team')} />
+          <NavButton icon={<Settings2 size={17} />} label="Settings" active={activeNav === 'Settings'} onClick={() => navigate('Settings')} />
         </nav>
 
         <div className="sidebar-bottom">
@@ -507,15 +507,17 @@ function DashboardApp() {
 
         <div className="page-wrap">
           {activeNav !== 'Inbox' && <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Overview' ? 'Ringkasan performa support & AI dalam 7 hari terakhir.' : activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : 'See how your support system is performing.'}</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Overview' ? 'Ringkasan performa support & AI dalam 7 hari terakhir.' : activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : activeNav === 'Team' ? 'Kelola anggota tim support & role akses mereka.' : activeNav === 'Settings' ? 'Konfigurasi workspace, channel, notifikasi & integrasi.' : 'See how your support system is performing.'}</p></div>
           </div>}
 
           {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} /></div>}
           {activeNav === 'Overview' && <OverviewView />}
           {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
           {activeNav === 'AI Agent' && <AgentsView agents={agents} autoFallback={autoFallback} saving={savingAgents} onSave={saveAgentSettings} />}
+          {activeNav === 'Team' && <TeamView setToast={setToast} />}
+          {activeNav === 'Settings' && <SettingsView setToast={setToast} />}
           {activeNav === 'Widget' && <WidgetView widgetOpen={widgetOpen} setWidgetOpen={setWidgetOpen} setToast={setToast} />}
-          {activeNav === 'Analytics' && <AnalyticsView />}
+          {activeNav === 'Analytics' && <AnalyticsView agents={agents} />}
         </div>
       </main>
 
@@ -896,7 +898,7 @@ function OverviewView() {
               <div className="document-row" key={idx}>
                 <div className="document-name"><strong>{agent.name}</strong></div>
                 <span>{agent.model}</span>
-                <span>{agent.provider}</span>
+                <span>{(agent as any).provider || '-'}</span>
                 <span>{agent.prompt.toLocaleString()}</span>
                 <span>{agent.completion.toLocaleString()}</span>
                 <span>{total.toLocaleString()}</span>
@@ -951,7 +953,7 @@ function OverviewView() {
             <div className="document-row" key={agent.id || idx}>
               <div className="document-name"><strong>{agent.name}</strong></div>
               <span>{agent.model || '-'}</span>
-              <span>{agent.provider || '-'}</span>
+              <span>{(agent as any).provider || '-'}</span>
               <span>{prompt.toLocaleString()}</span>
               <span>{completion.toLocaleString()}</span>
               <span>{total.toLocaleString()}</span>
@@ -1083,6 +1085,104 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
       <div className="panel router-panel">
         <div className="toggle-setting"><div><strong>Auto-switch when quota runs out</strong><span>On rate limit, quota error, or timeout the router moves to the next enabled agent in the chain.</span></div><button type="button" className={`toggle ${draftFallback ? 'on' : ''}`} aria-label="Toggle auto-switch" onClick={() => { setDirty(true); setDraftFallback((value) => !value) }}><span /></button></div>
         <div className="router-order"><span>Fallback order</span><strong>{enabledDraft.map((agent) => agent.name || 'Untitled').join(' → ') || '—'}</strong></div>
+      </div>
+    </div>
+  )
+}
+
+function TeamView({ setToast }: { setToast: (value: string) => void }) {
+  const [members, setMembers] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/team').then(async (res) => {
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json()
+      if (active) setMembers(Array.isArray(data.members) ? data.members : [])
+    }).catch(() => active && setMembers([])).finally(() => active && setLoading(false))
+    return () => { active = false }
+  }, [])
+
+  const addMember = async () => {
+    const name = prompt('Nama anggota tim')
+    const email = prompt('Email')
+    const role = prompt('Role (admin/agent/support)') || 'agent'
+    if (!name || !email) return
+    try {
+      const res = await fetch('/api/team', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, email, role }) })
+      if (res.ok) {
+        const data = await res.json()
+        setMembers((m) => [...m, data.member])
+        setToast('Anggota tim ditambahkan')
+      } else setToast('Gagal menambahkan anggota')
+    } catch { setToast('Gagal menambahkan anggota') }
+  }
+
+  return (
+    <div className="secondary-layout">
+      <div className="section-toolbar actions-only">
+        <div className="toolbar-actions"><button className="button button-secondary" onClick={addMember}><Plus size={15} /> Tambah anggota</button></div>
+      </div>
+      <div className="knowledge-overview">
+        <div className="knowledge-stat"><div className="knowledge-stat-icon blue"><UsersRound size={18} /></div><div><span>Total anggota</span><strong>{members.length}</strong><small>Tim support aktif</small></div></div>
+        <div className="knowledge-stat"><div className="knowledge-stat-icon mint"><CheckCircle2 size={18} /></div><div><span>Admin</span><strong>{members.filter(m=>m.role==='admin').length}</strong></div></div>
+        <div className="knowledge-stat"><div className="knowledge-stat-icon orange"><Bot size={18} /></div><div><span>Agent</span><strong>{members.filter(m=>m.role==='agent'||m.role==='support').length}</strong></div></div>
+      </div>
+      <div className="table-card panel">
+        <div className="table-heading"><div><h3>Daftar tim</h3><span>Data diambil dari database</span></div></div>
+        <div className="document-table">
+          <div className="document-row document-head"><span>Nama</span><span>Email</span><span>Role</span><span>Status</span><span>Terakhir aktif</span><span /></div>
+          {loading && <div className="document-row"><span>Memuat...</span></div>}
+          {!loading && members.length === 0 && <div className="document-row"><span>Belum ada anggota tim</span></div>}
+          {members.map((m) => (
+            <div className="document-row" key={m.id}><div className="document-name"><strong>{m.name}</strong></div><span>{m.email}</span><span>{m.role}</span><span>{m.status||'active'}</span><span>{m.last_active||'-'}</span><button className="icon-button subtle"><MoreHorizontal size={17}/></button></div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SettingsView({ setToast }: { setToast: (value: string) => void }) {
+  const [settings, setSettings] = useState<any>({})
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    fetch('/api/settings').then(async (res) => {
+      if (!res.ok) throw new Error('Failed')
+      const data = await res.json()
+      if (active) setSettings(data.settings||{})
+    }).catch(() => active && setSettings({})).finally(() => active && setLoading(false))
+    return () => { active = false }
+  }, [])
+
+  const save = async () => {
+    try {
+      const res = await fetch('/api/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings }) })
+      if (res.ok) setToast('Pengaturan disimpan')
+      else setToast('Gagal menyimpan')
+    } catch { setToast('Gagal menyimpan') }
+  }
+
+  return (
+    <div className="secondary-layout">
+      <div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-primary" onClick={save}><Check size={15}/> Simpan</button></div></div>
+      <div className="panel" style={{padding:16}}>
+        <div className="table-heading" style={{borderBottom:'none', padding:0, marginBottom:16}}><div><h3>General Settings</h3><span>Data diambil & disimpan ke database</span></div></div>
+        {loading ? <div>Memuat...</div> : <div className="config-form" style={{padding:0}}>
+          <label>Workspace Name<input value={settings.workspace_name||''} onChange={e=>setSettings({...settings, workspace_name:e.target.value})}/></label>
+          <label>Support Email<input value={settings.support_email||''} onChange={e=>setSettings({...settings, support_email:e.target.value})}/></label>
+          <label>Company Name<input value={settings.company_name||''} onChange={e=>setSettings({...settings, company_name:e.target.value})}/></label>
+        </div>}
+      </div>
+      <div className="panel" style={{padding:16, marginTop:12}}>
+        <div className="table-heading" style={{borderBottom:'none', padding:0, marginBottom:16}}><div><h3>Channel Settings</h3></div></div>
+        <div className="config-form" style={{padding:0}}>
+          <label>WhatsApp Enabled<input value={settings.whatsapp_enabled||''} onChange={e=>setSettings({...settings, whatsapp_enabled:e.target.value})}/></label>
+          <label>Webhook URL<input value={settings.webhook_url||''} onChange={e=>setSettings({...settings, webhook_url:e.target.value})}/></label>
+        </div>
       </div>
     </div>
   )

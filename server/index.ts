@@ -60,6 +60,8 @@ const ensureDatabase = async () => {
       await db.execute(`CREATE TABLE IF NOT EXISTS conversation_status (conversation_id TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT, updated_at TEXT NOT NULL)`)
       await db.execute(`CREATE TABLE IF NOT EXISTS ai_agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, model TEXT NOT NULL, api_url TEXT NOT NULL, api_key TEXT NOT NULL, enabled INTEGER NOT NULL, priority INTEGER NOT NULL, updated_at TEXT NOT NULL)`)
       await db.execute(`CREATE TABLE IF NOT EXISTS ai_agent_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS team_members (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, role TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', last_active TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+      await db.execute(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`)
       await db.execute(`CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages (conversation_id, created_at)`)
     })().catch((error) => {
       databaseSchema = null
@@ -427,6 +429,46 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
     } catch {
       return json(response, { data: [], meta: { tenant: 'northstar-goods', status: 'AI | HUMAN_HANDOFF | RESOLVED' } })
     }
+  }
+  if (method === 'GET' && url.pathname === '/api/team') {
+    try {
+      const db = await ensureDatabase()
+      const rows = await db.execute('SELECT id, name, email, role, status, last_active, created_at FROM team_members ORDER BY created_at DESC')
+      const members = rows.rows.map(r => ({ id: String(r.id), name: String(r.name), email: String(r.email), role: String(r.role), status: String(r.status), last_active: r.last_active ? String(r.last_active) : null, created_at: String(r.created_at) }))
+      return json(response, { members })
+    } catch { return json(response, { members: [] }) }
+  }
+  if (method === 'POST' && url.pathname === '/api/team') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { name?: string; email?: string; role?: string }
+      if (!body.name || !body.email) return json(response, { error: 'name and email required' }, 400)
+      const db = await ensureDatabase()
+      const id = randomBytes(8).toString('hex')
+      const now = new Date().toISOString()
+      await db.execute({ sql: 'INSERT INTO team_members (id, name, email, role, status, last_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', args: [id, body.name, body.email, body.role || 'agent', 'active', now, now, now] })
+      return json(response, { ok: true, member: { id, name: body.name, email: body.email, role: body.role || 'agent', status: 'active', last_active: now } })
+    } catch (e) { return json(response, { error: 'Failed to add member' }, 500) }
+  }
+  if (method === 'GET' && url.pathname === '/api/settings') {
+    try {
+      const db = await ensureDatabase()
+      const rows = await db.execute('SELECT key, value FROM settings')
+      const settings: Record<string,string> = {}
+      rows.rows.forEach(r => { settings[String(r.key)] = String(r.value) })
+      return json(response, { settings })
+    } catch { return json(response, { settings: {} }) }
+  }
+  if (method === 'POST' && url.pathname === '/api/settings') {
+    try {
+      const body = JSON.parse(await readBody(request)) as { settings?: Record<string,any> }
+      const db = await ensureDatabase()
+      const now = new Date().toISOString()
+      const settings = body.settings || {}
+      for (const [k,v] of Object.entries(settings)) {
+        await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, args: [k, String(v), now] })
+      }
+      return json(response, { ok: true })
+    } catch { return json(response, { error: 'Failed to save settings' }, 500) }
   }
   if (method === 'GET' && url.pathname === '/api/chat/public/history') {
     try {

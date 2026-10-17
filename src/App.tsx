@@ -862,11 +862,105 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
 }
 
 function OverviewView() {
-  return <div className="secondary-layout"><div className="metric-row"><MetricCard label="Total conversations" value="1,284" trend="+12%" trendLabel="vs last week" icon={<MessageCircle size={19} />} tone="blue" /><MetricCard label="Chat yang diarahkan" value="186" trend="-8%" trendLabel="vs last week" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Chat yang belum dibalas" value="24" trend="-12%" trendLabel="vs last week" icon={<Clock3 size={19} />} tone="purple" /><MetricCard label="AI resolved" value="72.4%" trend="+6.2%" trendLabel="vs last week" icon={<Sparkles size={19} />} tone="mint" /><MetricCard label="Needs handoff" value="186" trend="-8%" trendLabel="vs last week" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Avg. response time" value="28s" trend="-14%" trendLabel="vs last week" icon={<Clock3 size={19} />} tone="lilac" /></div><div className="analytics-grid" style={{ marginTop: '16px' }}><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div></div>
+  return <div className="secondary-layout"><div className="metric-row"><MetricCard label="Total conversations" value="1,284" trend="+12%" trendLabel="vs last week" icon={<MessageCircle size={19} />} tone="blue" /><MetricCard label="Chat yang diarahkan" value="186" trend="-8%" trendLabel="vs last week" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Chat yang belum dibalas" value="24" trend="-12%" trendLabel="vs last week" icon={<Clock3 size={19} />} tone="purple" /><MetricCard label="AI resolved" value="72.4%" trend="+6.2%" trendLabel="vs last week" icon={<Sparkles size={19} />} tone="mint" /><MetricCard label="Needs handoff" value="186" trend="-8%" trendLabel="vs last week" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Avg. response time" value="28s" trend="-14%" trendLabel="vs last week" icon={<Clock3 size={19} />} tone="lilac" /></div><div className="analytics-grid" style={{ marginTop: '16px' }}><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div>      <div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div>
+      <div className="table-card panel" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
+        <div className="table-heading">
+          <div><h3>Token usage per AI agent</h3><span>Breakdown token usage & report count per AI agent yang digunakan</span></div>
+        </div>
+        <div className="document-table">
+          <div className="document-row document-head">
+            <span>AI Agent</span>
+            <span>Model</span>
+            <span>Provider</span>
+            <span>Prompt tokens</span>
+            <span>Completion tokens</span>
+            <span>Total tokens</span>
+            <span>Requests</span>
+            <span>Avg. tokens/req</span>
+            <span>Reports</span>
+            <span>Cost (est.)</span>
+          </div>
+          {[
+            { name: 'General Support', model: 'gpt-4.1-mini', provider: 'OpenAI', prompt: 124580, completion: 42340, requests: 842, reports: 12 },
+            { name: 'Billing Agent', model: 'claude-3.5-haiku', provider: 'Anthropic', prompt: 89240, completion: 31200, requests: 456, reports: 24 },
+            { name: 'Technical Agent', model: 'gemini-2.0-flash', provider: 'Google', prompt: 156320, completion: 52480, requests: 623, reports: 8 },
+            { name: 'Escalation Agent', model: 'gpt-4.1', provider: 'OpenAI', prompt: 42860, completion: 18920, requests: 214, reports: 32 },
+            { name: 'FAQ Bot', model: 'llama-3.1-8b', provider: 'Ollama', prompt: 67890, completion: 22450, requests: 389, reports: 5 },
+          ].map((agent, idx) => {
+            const total = agent.prompt + agent.completion
+            const avg = Math.round(total / agent.requests)
+            const cost = (total / 1000000) * 0.002
+            const rep = agent.reports
+            const repClass = rep >= 20 ? 'bad' : rep >= 10 ? 'warn' : 'ok'
+            return (
+              <div className="document-row" key={idx}>
+                <div className="document-name"><strong>{agent.name}</strong></div>
+                <span>{agent.model}</span>
+                <span>{agent.provider}</span>
+                <span>{agent.prompt.toLocaleString()}</span>
+                <span>{agent.completion.toLocaleString()}</span>
+                <span>{total.toLocaleString()}</span>
+                <span>{agent.requests.toLocaleString()}</span>
+                <span>{avg.toLocaleString()}</span>
+                <span><span className={`report-badge ${repClass}`}>{rep}</span></span>
+                <span>${cost.toFixed(4)}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
 }
 
 function AnalyticsView() {
-  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary"><Clock3 size={15} /> Last 7 days <ChevronDown size={14} /></button><button className="button button-primary"><ArrowUpRight size={15} /> Export report</button></div></div><div className="analytics-grid"><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div></div>
+  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary"><Clock3 size={15} /> Last 7 days <ChevronDown size={14} /></button><button className="button button-primary"><ArrowUpRight size={15} /> Export report</button></div></div><div className="analytics-grid"><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div>      <div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div>
+      <div className="table-card panel" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
+        <div className="table-heading">
+          <div><h3>Token usage per AI agent</h3><span>Breakdown token usage & report count per AI agent yang digunakan</span></div>
+        </div>
+        <div className="document-table">
+          <div className="document-row document-head">
+            <span>AI Agent</span>
+            <span>Model</span>
+            <span>Provider</span>
+            <span>Prompt tokens</span>
+            <span>Completion tokens</span>
+            <span>Total tokens</span>
+            <span>Requests</span>
+            <span>Avg. tokens/req</span>
+            <span>Reports</span>
+            <span>Cost (est.)</span>
+          </div>
+          {[
+            { name: 'General Support', model: 'gpt-4.1-mini', provider: 'OpenAI', prompt: 124580, completion: 42340, requests: 842, reports: 12 },
+            { name: 'Billing Agent', model: 'claude-3.5-haiku', provider: 'Anthropic', prompt: 89240, completion: 31200, requests: 456, reports: 24 },
+            { name: 'Technical Agent', model: 'gemini-2.0-flash', provider: 'Google', prompt: 156320, completion: 52480, requests: 623, reports: 8 },
+            { name: 'Escalation Agent', model: 'gpt-4.1', provider: 'OpenAI', prompt: 42860, completion: 18920, requests: 214, reports: 32 },
+            { name: 'FAQ Bot', model: 'llama-3.1-8b', provider: 'Ollama', prompt: 67890, completion: 22450, requests: 389, reports: 5 },
+          ].map((agent, idx) => {
+            const total = agent.prompt + agent.completion
+            const avg = Math.round(total / agent.requests)
+            const cost = (total / 1000000) * 0.002
+            const rep = agent.reports
+            const repClass = rep >= 20 ? 'bad' : rep >= 10 ? 'warn' : 'ok'
+            return (
+              <div className="document-row" key={idx}>
+                <div className="document-name"><strong>{agent.name}</strong></div>
+                <span>{agent.model}</span>
+                <span>{agent.provider}</span>
+                <span>{agent.prompt.toLocaleString()}</span>
+                <span>{agent.completion.toLocaleString()}</span>
+                <span>{total.toLocaleString()}</span>
+                <span>{agent.requests.toLocaleString()}</span>
+                <span>{avg.toLocaleString()}</span>
+                <span><span className={`report-badge ${repClass}`}>{rep}</span></span>
+                <span>${cost.toFixed(4)}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
 }
 
 const agentStatusLabel = (status: AgentStatus) => status === 'ready' ? 'Ready' : status === 'exhausted' ? 'Quota exhausted' : status === 'unconfigured' ? 'Needs API key' : 'Disabled'

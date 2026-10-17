@@ -307,6 +307,21 @@ h1 { font-size: 26px; letter-spacing: -1.1px; line-height: 1.1; }
 .document-row .status-badge { font-size: 8px; padding: 4px 9px; }
 .unread-pill { display: inline-grid; place-items: center; min-width: 21px; height: 21px; padding: 0 6px; border-radius: 11px; background: var(--blue); color: #fff; font-size: 9px; font-weight: 800; }
 
+/* --- Setting ukuran font (halaman Settings) --- */
+html[data-font-size="medium"] body { zoom: 1.12; }
+html[data-font-size="large"] body { zoom: 1.25; }
+.font-size-options { display: flex; gap: 8px; }
+.font-size-option { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e3e8e2; background: #fbfcfb; border-radius: 7px; padding: 9px 14px; color: #4d5750; font-size: 9px; font-weight: 700; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.font-size-option:hover { border-color: #c9d2ff; }
+.font-size-option.active { border-color: var(--blue); background: var(--blue-pale); color: var(--blue-deep); }
+.font-size-sample { font-weight: 800; color: #8b938d; line-height: 1; }
+.font-size-option.active .font-size-sample { color: var(--blue); }
+.sample-small { font-size: 9px; }
+.sample-medium { font-size: 12px; }
+.sample-large { font-size: 15px; }
+.setting-hint { color: #9aa29c; font-size: 9px; line-height: 1.55; }
+.setting-hint b { color: #5d6760; }
+
 .logout-link { color: #7e8982; font-size: 10px; font-weight: 700; text-decoration: none; }
 .logout-link:hover { color: var(--blue); }
 

@@ -1147,9 +1147,33 @@ function TeamView({ setToast }: { setToast: (value: string) => void }) {
   )
 }
 
+type FontSizeOption = 'small' | 'medium' | 'large'
+
+const FONT_SIZE_STORAGE_KEY = 'supportflow-font-size'
+
+const fontSizeLabels: Record<FontSizeOption, string> = { small: 'Kecil', medium: 'Sedang', large: 'Besar' }
+
+function applyFontSize(value: FontSizeOption) {
+  document.documentElement.dataset.fontSize = value
+  try { localStorage.setItem(FONT_SIZE_STORAGE_KEY, value) } catch { /* preference only */ }
+}
+
 function SettingsView({ setToast }: { setToast: (value: string) => void }) {
   const [settings, setSettings] = useState<any>({})
   const [loading, setLoading] = useState(true)
+  const [fontSize, setFontSize] = useState<FontSizeOption>(() => {
+    try {
+      const saved = localStorage.getItem(FONT_SIZE_STORAGE_KEY)
+      if (saved === 'small' || saved === 'medium' || saved === 'large') return saved
+    } catch { /* fall through to default */ }
+    return 'small'
+  })
+
+  const changeFontSize = (value: FontSizeOption) => {
+    setFontSize(value)
+    applyFontSize(value)
+    setSettings((current: any) => ({ ...current, font_size: value }))
+  }
 
   useEffect(() => {
     let active = true
@@ -1187,6 +1211,29 @@ function SettingsView({ setToast }: { setToast: (value: string) => void }) {
           <label>Webhook URL<input value={settings.webhook_url||''} onChange={e=>setSettings({...settings, webhook_url:e.target.value})}/></label>
         </div>
       </div>
+      <div className="panel" style={{padding:16, marginTop:12}}>
+        <div className="table-heading" style={{borderBottom:'none', padding:0, marginBottom:16}}><div><h3>Tampilan</h3><span>Atur ukuran font di seluruh halaman dashboard</span></div></div>
+        <div className="config-form" style={{padding:0}}>
+          <label>Ukuran font
+            <div className="font-size-options" role="radiogroup" aria-label="Ukuran font">
+              {(Object.keys(fontSizeLabels) as FontSizeOption[]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={fontSize === option}
+                  className={`font-size-option ${fontSize === option ? 'active' : ''}`}
+                  onClick={() => changeFontSize(option)}
+                >
+                  <span className={`font-size-sample sample-${option}`}>Aa</span>
+                  {fontSizeLabels[option]}
+                </button>
+              ))}
+            </div>
+          </label>
+          <p className="setting-hint">Pilihan langsung diterapkan dan diingat di perangkat ini. Tekan <b>Simpan</b> untuk menyimpannya ke workspace.</p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1199,6 +1246,13 @@ function App() {
   const isConversationRoute = /^\/app\/inbox\/.+/.test(path)
   const isPrivateRoute = path.startsWith('/app') || path === '/knowledge' || path === '/widget' || path === '/analytics'
   const [session, setSession] = useState<'loading' | 'authenticated' | 'anonymous'>('loading')
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(FONT_SIZE_STORAGE_KEY)
+      if (saved === 'small' || saved === 'medium' || saved === 'large') applyFontSize(saved)
+    } catch { /* preference unavailable */ }
+  }, [])
 
   useEffect(() => {
     if (!isPrivateRoute) {

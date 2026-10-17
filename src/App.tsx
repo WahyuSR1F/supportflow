@@ -722,14 +722,45 @@ function ConversationPage({ path }: { path: string }) {
   }
 
   return (
-    <div className="conversation-page">
-      <div className="thread-panel panel">
-        <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app') }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><span className="contact-location">{conversation.location}</span></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
-        {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={takeOver}>Take over <ArrowUpRight size={14} /></button></div>}
-        <div className="thread-body"><div className="date-divider"><span>Today</span></div>{conversation.messages.map((message, index) => <MessageBubble key={`${conversation.id}-${index}`} message={message} conversation={conversation} />)}<TypingIndicator /></div>
-        <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea ref={composerTextareaRef} value={composer} onChange={(event) => { setComposer(event.target.value); growComposer(event) }} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) handleSend() }} placeholder="Write a reply…" aria-label="Write a reply" />{attachment && <div className="composer-attachment">{attachment.type === 'image' ? <img src={attachment.url} alt={attachment.name} /> : <span><div className="attachment-icon"><FileText size={16} /></div>{attachment.name}</span>}<button type="button" aria-label="Remove attachment" onClick={() => setAttachment(null)}>×</button></div>}<div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button><button aria-label="Attach image" onClick={() => imageInputRef.current?.click()}><Image size={16} /></button></div><button className="send-button" onClick={handleSend}><Send size={15} /> Send reply</button></div><input ref={fileInputRef} type="file" accept="*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /><input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /></div>
-      </div>
-      {toast && <div className="toast"><CheckCircle2 size={17} /> {toast}</div>}
+    <div className="app-shell" style={{height:'100vh'}}>
+      <aside className="sidebar">
+        <div className="brand-lockup">
+          <div className="brand-mark" aria-hidden="true"><span /><span /><i /></div>
+          <div><div className="brand-name">SupportFlow</div><div className="brand-subtitle">AI support operations</div></div>
+        </div>
+        <div className="workspace-switcher">
+          <div className="workspace-avatar">N</div>
+          <div className="workspace-copy"><strong>Northstar Goods</strong><span>Workspace · Pro</span></div>
+          <ChevronDown size={15} />
+        </div>
+        <nav className="primary-nav" aria-label="Primary navigation">
+          <div className="nav-label">Workspace</div>
+          <NavButton icon={<LayoutDashboard size={17} />} label="Overview" onClick={() => { window.location.assign('/app'); }} />
+          <NavButton icon={<Inbox size={17} />} label="Inbox" active onClick={() => { window.location.assign('/app'); }} />
+          <NavButton icon={<Database size={17} />} label="Knowledge base" onClick={() => { window.location.assign('/app'); }} />
+          <NavButton icon={<Code2 size={17} />} label="Widget" onClick={() => { window.location.assign('/app'); }} />
+          <NavButton icon={<BarChart3 size={17} />} label="Analytics" onClick={() => { window.location.assign('/app'); }} />
+          <div className="nav-label nav-label-spaced">Manage</div>
+          <NavButton icon={<Bot size={17} />} label="AI Agent" onClick={() => { window.location.assign('/app'); }} />
+          <NavButton icon={<UsersRound size={17} />} label="Team" onClick={() => { window.location.assign('/app'); }} />
+          <NavButton icon={<Settings2 size={17} />} label="Settings" onClick={() => { window.location.assign('/app'); }} />
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="upgrade-card"><div className="upgrade-icon"><Zap size={15} /></div><div><strong>AI usage</strong><span>68% of monthly credits</span></div><ArrowUpRight size={15} /></div>
+          <div className="sidebar-user"><div className="user-avatar">AR</div><div><strong>Ayunda Rahma</strong><span>Admin</span></div><MoreHorizontal size={17} /></div>
+        </div>
+      </aside>
+      <main className="main-area" style={{height:'100vh', overflow:'hidden'}}>
+        <div className="conversation-page" style={{height:'100%'}}>
+          <div className="thread-panel panel">
+            <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app') }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><span className="contact-location">{conversation.location}</span></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
+            {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={takeOver}>Take over <ArrowUpRight size={14} /></button></div>}
+            <div className="thread-body"><div className="date-divider"><span>Today</span></div>{conversation.messages.map((message, index) => <MessageBubble key={`${conversation.id}-${index}`} message={message} conversation={conversation} />)}<TypingIndicator /></div>
+            <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea ref={composerTextareaRef} value={composer} onChange={(event) => { setComposer(event.target.value); growComposer(event) }} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) handleSend() }} placeholder="Write a reply…" aria-label="Write a reply" />{attachment && <div className="composer-attachment">{attachment.type === 'image' ? <img src={attachment.url} alt={attachment.name} /> : <span><div className="attachment-icon"><FileText size={16} /></div>{attachment.name}</span>}<button type="button" aria-label="Remove attachment" onClick={() => setAttachment(null)}>×</button></div>}<div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button><button aria-label="Attach image" onClick={() => imageInputRef.current?.click()}><Image size={16} /></button></div><button className="send-button" onClick={handleSend}><Send size={15} /> Send reply</button></div><input ref={fileInputRef} type="file" accept="*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /><input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /></div>
+          </div>
+        </div>
+        {toast && <div className="toast"><CheckCircle2 size={17} /> {toast}</div>}
+      </main>
     </div>
   )
 }

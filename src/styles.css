@@ -21,6 +21,8 @@
   --orange-pale: #fff0e9;
   --lilac: #8766d7;
   --lilac-pale: #f2edff;
+  --purple: #7c3aed;
+  --purple-pale: #f3f0ff;
   --shadow: 0 14px 36px rgba(36, 47, 42, 0.06);
 }
 
@@ -141,10 +143,10 @@ h1 { font-size: 26px; letter-spacing: -1.1px; line-height: 1.1; }
 .button-ghost { background: transparent; color: #69716c; border: 0; }
 .button.small { padding: 7px 10px; font-size: 9px; }
 .button.full { width: 100%; margin-top: 4px; }
-.metric-row { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.metric-row { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 12px; margin-bottom: 18px; }
 .metric-card { position: relative; display: flex; gap: 11px; align-items: flex-start; border: 1px solid var(--border); background: #fff; border-radius: 9px; padding: 14px; box-shadow: 0 3px 12px rgba(36, 47, 42, .02); }
 .metric-icon { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 7px; }
-.metric-icon.blue { background: var(--blue-pale); color: var(--blue); }.metric-icon.mint { background: var(--mint-pale); color: var(--mint); }.metric-icon.orange { background: var(--orange-pale); color: var(--orange); }.metric-icon.lilac { background: var(--lilac-pale); color: var(--lilac); }
+.metric-icon.blue { background: var(--blue-pale); color: var(--blue); }.metric-icon.mint { background: var(--mint-pale); color: var(--mint); }.metric-icon.orange { background: var(--orange-pale); color: var(--orange); }.metric-icon.lilac { background: var(--lilac-pale); color: var(--lilac); }.metric-icon.purple { background: var(--purple-pale); color: var(--purple); }
 .metric-copy { display: flex; flex-direction: column; gap: 3px; }.metric-copy > span { color: var(--muted); font-size: 9px; }.metric-copy strong { font-size: 19px; letter-spacing: -.6px; line-height: 1.05; }.metric-copy small { color: #a0a7a2; font-size: 8px; }.metric-copy small b { color: var(--mint); font-weight: 700; }.metric-copy small b.neutral-trend { color: var(--orange); }.metric-arrow { position: absolute; top: 14px; right: 14px; color: #b9c0bb; }
 .panel { border: 1px solid var(--border); background: var(--panel); border-radius: 10px; box-shadow: var(--shadow); }
 

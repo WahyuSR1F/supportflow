@@ -47,7 +47,7 @@ import {
 import { AuthCallbackPage, AuthPage, LandingPage } from './Marketing'
 import './styles.css'
 
-type NavItem = 'Inbox' | 'Knowledge base' | 'Widget' | 'Analytics' | 'AI Agent'
+type NavItem = 'Overview' | 'Inbox' | 'Knowledge base' | 'Widget' | 'Analytics' | 'AI Agent'
 type AgentStatus = 'ready' | 'exhausted' | 'unconfigured' | 'disabled'
 
 type AiAgent = {
@@ -278,7 +278,7 @@ const growComposer = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
 
 function DashboardApp() {
   const path = window.location.pathname
-  const initialNav: NavItem = path.includes('agents') ? 'AI Agent' : path.includes('knowledge') ? 'Knowledge base' : path.includes('widget') ? 'Widget' : path.includes('analytics') ? 'Analytics' : 'Inbox'
+  const initialNav: NavItem = path.includes('agents') ? 'AI Agent' : path.includes('knowledge') ? 'Knowledge base' : path.includes('widget') ? 'Widget' : path.includes('analytics') ? 'Analytics' : path.includes('inbox') ? 'Inbox' : 'Overview'
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav)
   const [collapsed, setCollapsed] = useState(false)
   const [conversations, setConversations] = useState(initialConversations)
@@ -433,7 +433,7 @@ function DashboardApp() {
 
   const navigate = (item: NavItem) => {
     setActiveNav(item)
-    const route = item === 'Inbox' ? '/app' : item === 'Knowledge base' ? '/app/knowledge' : item === 'Widget' ? '/app/widget' : item === 'AI Agent' ? '/app/agents' : '/app/analytics'
+    const route = item === 'Overview' ? '/app' : item === 'Inbox' ? '/app/inbox' : item === 'Knowledge base' ? '/app/knowledge' : item === 'Widget' ? '/app/widget' : item === 'AI Agent' ? '/app/agents' : '/app/analytics'
     window.history.replaceState({}, '', route)
   }
 
@@ -482,7 +482,7 @@ function DashboardApp() {
 
         <nav className="primary-nav" aria-label="Primary navigation">
           <div className="nav-label">Workspace</div>
-          <NavButton icon={<LayoutDashboard size={17} />} label="Overview" onClick={() => setToast('Overview is coming next')} />
+          <NavButton icon={<LayoutDashboard size={17} />} label="Overview" active={activeNav === 'Overview'} onClick={() => navigate('Overview')} />
           <NavButton icon={<Inbox size={17} />} label="Inbox" active={activeNav === 'Inbox'} count="12" onClick={() => navigate('Inbox')} />
           <NavButton icon={<Database size={17} />} label="Knowledge base" active={activeNav === 'Knowledge base'} onClick={() => navigate('Knowledge base')} />
           <NavButton icon={<Code2 size={17} />} label="Widget" active={activeNav === 'Widget'} onClick={() => navigate('Widget')} />
@@ -507,10 +507,11 @@ function DashboardApp() {
 
         <div className="page-wrap">
           {activeNav !== 'Inbox' && <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : 'See how your support system is performing.'}</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Overview' ? 'Ringkasan performa support & AI dalam 7 hari terakhir.' : activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : 'See how your support system is performing.'}</p></div>
           </div>}
 
           {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} /></div>}
+          {activeNav === 'Overview' && <OverviewView />}
           {activeNav === 'Knowledge base' && <KnowledgeView documents={documents} addDocument={addDocument} setToast={setToast} />}
           {activeNav === 'AI Agent' && <AgentsView agents={agents} autoFallback={autoFallback} saving={savingAgents} onSave={saveAgentSettings} />}
           {activeNav === 'Widget' && <WidgetView widgetOpen={widgetOpen} setWidgetOpen={setWidgetOpen} setToast={setToast} />}
@@ -858,6 +859,10 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
         </div>
       </div>
     </div>
+}
+
+function OverviewView() {
+  return <div className="secondary-layout"><div className="metric-row"><MetricCard label="Total conversations" value="1,284" trend="+12%" trendLabel="vs last week" icon={<MessageCircle size={19} />} tone="blue" /><MetricCard label="AI resolved" value="72.4%" trend="+6.2%" trendLabel="vs last week" icon={<Sparkles size={19} />} tone="mint" /><MetricCard label="Needs handoff" value="186" trend="-8%" trendLabel="vs last week" icon={<AlertTriangle size={19} />} tone="orange" /><MetricCard label="Avg. response time" value="28s" trend="-14%" trendLabel="vs last week" icon={<Clock3 size={19} />} tone="lilac" /></div><div className="analytics-grid" style={{ marginTop: '16px' }}><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div></div>
 }
 
 function AnalyticsView() {

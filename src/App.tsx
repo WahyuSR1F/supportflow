@@ -910,10 +910,21 @@ function OverviewView() {
         </div>
       </div>
     </div>
-}
+}function AnalyticsView({ agents }: { agents: AiAgent[] }) {
+  const tokenRows = agents.map((agent, idx) => {
+    const base = 40000 + idx * 25000
+    const prompt = Math.floor(base * 0.7)
+    const completion = Math.floor(base * 0.3)
+    const requests = 120 + idx * 40
+    const total = prompt + completion
+    const avg = requests > 0 ? Math.round(total / requests) : 0
+    const cost = (total / 1000000) * 0.002
+    const reports = Math.max(0, Math.floor((idx + 1) * 6 - (idx % 2) * 4))
+    const repClass = reports >= 20 ? 'bad' : reports >= 10 ? 'warn' : 'ok'
+    return { agent, prompt, completion, total, requests, avg, cost, reports, repClass }
+  })
 
-function AnalyticsView() {
-  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary"><Clock3 size={15} /> Last 7 days <ChevronDown size={14} /></button><button className="button button-primary"><ArrowUpRight size={15} /> Export report</button></div></div><div className="analytics-grid"><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div>      <div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div>
+  return <div className="secondary-layout"><div className="section-toolbar actions-only"><div className="toolbar-actions"><button className="button button-secondary"><Clock3 size={15} /> Last 7 days <ChevronDown size={14} /></button><button className="button button-primary"><ArrowUpRight size={15} /> Export report</button></div></div><div className="analytics-grid"><div className="chart-card panel"><div className="chart-heading"><div><h3>Conversation volume</h3><span>1,284 total conversations</span></div><div className="chart-legend"><span><i className="legend-dot blue-dot" /> Incoming</span><span><i className="legend-dot mint-dot" /> Resolved</span></div></div><div className="chart-area"><div className="y-labels"><span>240</span><span>180</span><span>120</span><span>60</span><span>0</span></div><div className="bars">{[58, 74, 48, 86, 66, 92, 78].map((height, index) => <div className="bar-group" key={index}><div className="bar-stack"><span className="bar incoming" style={{ height: `${height}%` }} /><span className="bar resolved" style={{ height: `${Math.max(18, height - 22)}%` }} /></div><small>{['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'Wed'][index]}</small></div>)}</div></div></div><div className="performance-card panel"><div className="chart-heading"><div><h3>AI performance</h3><span>Last 7 days</span></div><Sparkles size={18} color="#4263eb" /></div><div className="performance-score"><strong>72.4%</strong><span>AI resolution rate</span><div className="score-line"><span style={{ width: '72.4%' }} /></div></div><div className="performance-row"><span><span className="signal-dot green" /> Resolved by AI</span><strong>930</strong></div><div className="performance-row"><span><span className="signal-dot orange" /> Human handoff</span><strong>186</strong></div><div className="performance-row"><span><span className="signal-dot gray" /> Unresolved</span><strong>168</strong></div><button className="text-button full-text">View resolution breakdown <ArrowUpRight size={14} /></button></div><div className="channel-card panel"><div className="chart-heading"><div><h3>Channel mix</h3><span>By conversations</span></div><MoreHorizontal size={18} /></div><div className="donut-wrap"><div className="donut"><div>1,284<strong>total</strong></div></div><div className="channel-legend"><span><i className="legend-dot blue-dot" /> WhatsApp <b>48%</b></span><span><i className="legend-dot purple-dot" /> Instagram <b>31%</b></span><span><i className="legend-dot mint-dot" /> Web chat <b>21%</b></span></div></div></div></div>
       <div className="table-card panel" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
         <div className="table-heading">
           <div><h3>Token usage per AI agent</h3><span>Breakdown token usage & report count per AI agent yang digunakan</span></div>
@@ -931,33 +942,25 @@ function AnalyticsView() {
             <span>Reports</span>
             <span>Cost (est.)</span>
           </div>
-          {[
-            { name: 'General Support', model: 'gpt-4.1-mini', provider: 'OpenAI', prompt: 124580, completion: 42340, requests: 842, reports: 12 },
-            { name: 'Billing Agent', model: 'claude-3.5-haiku', provider: 'Anthropic', prompt: 89240, completion: 31200, requests: 456, reports: 24 },
-            { name: 'Technical Agent', model: 'gemini-2.0-flash', provider: 'Google', prompt: 156320, completion: 52480, requests: 623, reports: 8 },
-            { name: 'Escalation Agent', model: 'gpt-4.1', provider: 'OpenAI', prompt: 42860, completion: 18920, requests: 214, reports: 32 },
-            { name: 'FAQ Bot', model: 'llama-3.1-8b', provider: 'Ollama', prompt: 67890, completion: 22450, requests: 389, reports: 5 },
-          ].map((agent, idx) => {
-            const total = agent.prompt + agent.completion
-            const avg = Math.round(total / agent.requests)
-            const cost = (total / 1000000) * 0.002
-            const rep = agent.reports
-            const repClass = rep >= 20 ? 'bad' : rep >= 10 ? 'warn' : 'ok'
-            return (
-              <div className="document-row" key={idx}>
-                <div className="document-name"><strong>{agent.name}</strong></div>
-                <span>{agent.model}</span>
-                <span>{agent.provider}</span>
-                <span>{agent.prompt.toLocaleString()}</span>
-                <span>{agent.completion.toLocaleString()}</span>
-                <span>{total.toLocaleString()}</span>
-                <span>{agent.requests.toLocaleString()}</span>
-                <span>{avg.toLocaleString()}</span>
-                <span><span className={`report-badge ${repClass}`}>{rep}</span></span>
-                <span>${cost.toFixed(4)}</span>
-              </div>
-            )
-          })}
+          {tokenRows.length === 0 && (
+            <div className="document-row" style={{ gridTemplateColumns: '1fr', color: '#717773', justifyContent: 'center' }}>
+              <span>Belum ada AI agent yang ditambahkan. Tambah agent di menu Agents untuk melihat token usage.</span>
+            </div>
+          )}
+          {tokenRows.map(({ agent, prompt, completion, total, requests, avg, cost, reports, repClass }, idx) => (
+            <div className="document-row" key={agent.id || idx}>
+              <div className="document-name"><strong>{agent.name}</strong></div>
+              <span>{agent.model || '-'}</span>
+              <span>{agent.provider || '-'}</span>
+              <span>{prompt.toLocaleString()}</span>
+              <span>{completion.toLocaleString()}</span>
+              <span>{total.toLocaleString()}</span>
+              <span>{requests.toLocaleString()}</span>
+              <span>{avg.toLocaleString()}</span>
+              <span><span className={`report-badge ${repClass}`}>{reports}</span></span>
+              <span>${cost.toFixed(4)}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

@@ -178,7 +178,7 @@ async function main() {
   console.log(`1. Install paketnya:`)
   console.log(`     npm install supportflow-widget   # atau: pnpm add supportflow-widget`)
   console.log(`\n2a. Lewat script tag (HTML apa pun):`)
-  console.log(`     <script src="https://unpkg.com/supportflow-widget/src/widget.js"></script>`)
+  console.log(`     <script src="${config.baseUrl}/supportflow-widget.js"></script>`)
   console.log(`     <script>window.SUPPORTFLOW_WIDGET_CONFIG = ${compact(configLiteral)};</script>`)
   console.log(`\n2b. Lewat JS (React/Vue/Next, panggil setelah DOM siap):`)
   console.log(`     const SupportFlowWidget = require('supportflow-widget')`)

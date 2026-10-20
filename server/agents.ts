@@ -39,9 +39,12 @@ export type RouterResult = {
   attempts: RouterAttempt[]
 }
 
+export type AgentUsage = { promptTokens: number; completionTokens: number }
+
 export type AgentsPersistence = {
   load: () => Promise<{ agents: AgentConfig[]; autoFallback: boolean } | null>
   save: (agents: AgentConfig[], autoFallback: boolean) => Promise<void>
+  recordUsage?: (agentId: string, model: string, usage: AgentUsage) => Promise<void>
 }
 
 export const EXHAUSTED_COOLDOWN_MS = 5 * 60_000
@@ -190,11 +193,15 @@ const callAgent = async (agent: AgentConfig, messages: Array<{ role: 'user' | 'a
       body: JSON.stringify({ model: agent.model, messages: [{ role: 'system', content: systemPrompt }, ...messages] }),
       signal: controller.signal,
     })
-    const payload = await response.json() as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }> }
+    const payload = await response.json() as { error?: { message?: string }; choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } }
     if (!response.ok || payload.error) throw new Error(`HTTP ${response.status}: ${payload.error?.message ?? 'request failed'}`)
     const content = payload.choices?.[0]?.message?.content?.trim()
     if (!content) throw new Error('LLM returned an empty response')
-    return content
+    const usage: AgentUsage = {
+      promptTokens: Number(payload.usage?.prompt_tokens ?? 0) || 0,
+      completionTokens: Number(payload.usage?.completion_tokens ?? 0) || 0,
+    }
+    return { content, usage }
   } finally {
     clearTimeout(timeout)
   }
@@ -236,10 +243,12 @@ export const callAgentWithRouter = async (
       continue
     }
     try {
-      const content = await callAgent(agent, messages)
+      const result = await callAgent(agent, messages)
       clearExhausted(agent.id)
+      // Catat pemakaian token async — tidak memperlambat respons chat.
+      if (persistence?.recordUsage) void persistence.recordUsage(agent.id, agent.model, result.usage).catch(() => undefined)
       return {
-        content,
+        content: result.content,
         agent: { id: agent.id, name: agent.name, model: agent.model },
         switchedFrom: firstChoice && agent.id !== firstChoice.id ? firstChoice.name : null,
         attempts,

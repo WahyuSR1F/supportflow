@@ -155,7 +155,11 @@ const callAgent = async (agent, messages) => {
         const content = payload.choices?.[0]?.message?.content?.trim();
         if (!content)
             throw new Error('LLM returned an empty response');
-        return content;
+        const usage = {
+            promptTokens: Number(payload.usage?.prompt_tokens ?? 0) || 0,
+            completionTokens: Number(payload.usage?.completion_tokens ?? 0) || 0,
+        };
+        return { content, usage };
     }
     finally {
         clearTimeout(timeout);
@@ -192,10 +196,13 @@ export const callAgentWithRouter = async (messages, preferredAgentId) => {
             continue;
         }
         try {
-            const content = await callAgent(agent, messages);
+            const result = await callAgent(agent, messages);
             clearExhausted(agent.id);
+            // Catat pemakaian token async — tidak memperlambat respons chat.
+            if (persistence?.recordUsage)
+                void persistence.recordUsage(agent.id, agent.model, result.usage).catch(() => undefined);
             return {
-                content,
+                content: result.content,
                 agent: { id: agent.id, name: agent.name, model: agent.model },
                 switchedFrom: firstChoice && agent.id !== firstChoice.id ? firstChoice.name : null,
                 attempts,

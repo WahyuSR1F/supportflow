@@ -229,7 +229,7 @@ h1 { font-size: 26px; letter-spacing: -1.1px; line-height: 1.1; }
 .attachment-icon { width: 22px; height: 22px; display: grid; place-items: center; background: #f1f3f1; color: #89938b; border-radius: 6px; margin-right: 6px; vertical-align: middle; }
 
 .message-attachment-icon { width: 22px; height: 22px; display: grid; place-items: center; background: #f1f3f1; color: #89938b; border-radius: 6px; flex: 0 0 auto; vertical-align: middle; }
-.attachment-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 9px; color: #2563eb; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; text-decoration: underline; cursor: pointer; }
+.attachment-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 9px; color: #5c655f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 
 /* Install widget — panduan pasang ke aplikasi lain */
 .install-card { margin-top: 16px; overflow: hidden; }
@@ -457,5 +457,5 @@ button.toggle { border: 0; cursor: pointer; }
 .composer-attachment span { flex: 1; min-width: 0; font-size: 9px; color: #5c655f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer-attachment button { border: 0; background: transparent; color: #9aa29c; font-size: 15px; line-height: 1; padding: 0 2px; }
 .composer-attachment button:hover { color: var(--ink); }
-.message-image { display: block; margin-top: 5px; max-width: 220px; border-radius: 6px; cursor: pointer; border: 2px solid #2563eb; }
+.message-image { display: block; margin-top: 5px; max-width: 220px; border-radius: 6px; }
 .message-image:only-child { margin-top: 0; }

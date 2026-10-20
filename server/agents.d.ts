@@ -30,17 +30,12 @@ export type RouterResult = {
     switchedFrom: string | null;
     attempts: RouterAttempt[];
 };
-export type AgentUsage = {
-    promptTokens: number;
-    completionTokens: number;
-};
 export type AgentsPersistence = {
     load: () => Promise<{
         agents: AgentConfig[];
         autoFallback: boolean;
     } | null>;
     save: (agents: AgentConfig[], autoFallback: boolean) => Promise<void>;
-    recordUsage?: (agentId: string, model: string, usage: AgentUsage) => Promise<void>;
 };
 export declare const EXHAUSTED_COOLDOWN_MS: number;
 export declare const registerAgentsPersistence: (hooks: AgentsPersistence) => void;

@@ -91,7 +91,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .app-shell.sidebar-collapsed .nav-button:hover .nav-tooltip { opacity: 1; transform: translateY(-50%) scale(1); }
 
 /* Full-bleed WhatsApp-style inbox (no outer page margin) */
-.inbox-fullscreen { margin: -29px -32px -40px; }
+.inbox-fullscreen { margin: 0; }
 .inbox-fullscreen .inbox-layout { grid-template-columns: minmax(280px, 340px) minmax(440px, 1fr); height: calc(100vh - 64px); min-height: 0; border-radius: 0; }
 .inbox-fullscreen .conversation-panel { border-radius: 0; border-left: 0; border-top: 0; border-bottom: 0; }
 .inbox-fullscreen .thread-panel { border-radius: 0; border-top: 0; border-right: 0; border-bottom: 0; }
@@ -126,6 +126,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .icon-button.tiny { width: 24px; height: 24px; }
 .notification-dot { position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--orange); border: 1px solid #fff; }
 .page-wrap { padding: 29px 32px 40px; max-width: 1800px; margin: 0 auto; }
+.page-wrap.inbox-page { padding: 0; max-width: none; }
+
+/* Inbox selection animation — URL detail (/app/inbox/<id>) ikut sinkron dua arah */
+.thread-enter { animation: threadFadeIn .25s ease; }
+@keyframes threadFadeIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) { .thread-enter { animation: none; } }
 .page-heading, .section-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; margin-bottom: 25px; }
 .section-toolbar.actions-only { justify-content: flex-end; }
 .eyebrow { display: flex; align-items: center; gap: 7px; color: #959d97; font-family: 'DM Mono', monospace; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
@@ -440,6 +449,16 @@ button.toggle { border: 0; cursor: pointer; }
 .agent-fields input:focus { border-color: #c3d0fb; }
 .agent-card-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .icon-mini { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border); background: #fff; border-radius: 6px; color: #8b938d; transition: .15s ease; }
+.icon-mini:disabled { opacity: .4; cursor: not-allowed; }
+.test-button { width: 100%; padding: 6px 8px; border: 1px solid #e3e8e2; background: #f8faf7; border-radius: 6px; color: #4d5750; font-size: 8px; font-weight: 600; display: flex; align-items: center; gap: 4px; transition: .15s ease; }
+.test-button:hover:not(:disabled) { background: #fff; border-color: #cdd5cf; color: var(--blue); }
+.test-button:disabled { opacity: .5; cursor: not-allowed; }
+.test-button.testing { background: #f0f4ff; border-color: #c3d0fb; color: var(--blue); }
+.agent-test-result { padding: 8px 10px; border-radius: 6px; font-size: 8px; line-height: 1.4; margin-top: 6px; border-left: 3px solid; }
+.agent-test-result.success { background: var(--mint-pale); border-color: var(--mint); color: #1e5a4d; }
+.agent-test-result.error { background: var(--orange-pale); border-color: var(--orange); color: #b54a1f; }
+.agent-test-result.loading { padding: 8px 10px; border-radius: 6px; font-size: 8px; color: #717773; border-left: 3px solid #cdd5cf; }
+.agent-test-message { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(0,0,0,0.06); color: inherit; }
 .icon-mini:hover:not(:disabled) { color: var(--ink); border-color: #cdd5cf; }
 .icon-mini:disabled { opacity: .4; cursor: not-allowed; }
 .router-panel { padding: 16px; }

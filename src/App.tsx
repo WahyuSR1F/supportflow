@@ -43,6 +43,7 @@ import {
   UserRound,
   UsersRound,
   Zap,
+  Radio,
 } from 'lucide-react'
 import { AuthCallbackPage, AuthPage, LandingPage } from './Marketing'
 import './styles.css'
@@ -342,13 +343,13 @@ const growComposer = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
   element.style.height = `${Math.min(element.scrollHeight, COMPOSER_MAX_HEIGHT)}px`
 }
 
-function DashboardApp() {
+function DashboardApp({ initialInboxId }: { initialInboxId?: string }) {
   const path = window.location.pathname
   const initialNav: NavItem = path.includes('agents') ? 'AI Agent' : path.includes('knowledge') ? 'Knowledge base' : path.includes('widget') ? 'Widget' : path.includes('analytics') ? 'Analytics' : path.includes('inbox') ? 'Inbox' : 'Overview'
   const [activeNav, setActiveNav] = useState<NavItem>(initialNav)
+  const [selectedId, setSelectedId] = useState<string | null>(initialInboxId ?? null)
   const [collapsed, setCollapsed] = useState(false)
   const [conversations, setConversations] = useState(initialConversations)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filter, setFilter] = useState<'All' | ConversationStatus>('All')
   const [composer, setComposer] = useState('')
@@ -413,38 +414,52 @@ function DashboardApp() {
   }, [])
 
   // Muat daftar percakapan nyata dari database (fallback: data demo lokal saat API gagal).
+  // Polling tiap 5 detik agar inbox realtime (chat masuk/update status otomatis muncul).
   useEffect(() => {
     let active = true
-    fetch('/api/conversations').then(async (response) => {
-      if (!response.ok) throw new Error('inbox unavailable')
-      const payload = await response.json() as { data?: ApiConversationRow[] }
-      if (!active || !Array.isArray(payload.data)) return
-      setConversations(payload.data.map(mapApiConversation))
-    }).catch(() => undefined)
-    return () => { active = false }
+    const load = () => {
+      fetch('/api/conversations').then(async (response) => {
+        if (!response.ok) throw new Error('inbox unavailable')
+        const payload = await response.json() as { data?: ApiConversationRow[] }
+        if (!active || !Array.isArray(payload.data)) return
+        setConversations((current) => {
+          const prev = new Map(current.map((c) => [c.id, c]))
+          return payload.data!.map((row) => {
+            const old = prev.get(row.id)
+            const mapped = mapApiConversation(row)
+            // Pertahankan pesan yang sudah dimuat agar tidak kedip saat polling.
+            if (old?.messagesLoaded) return { ...mapped, messages: old.messages, messagesLoaded: true }
+            return mapped
+          })
+        })
+      }).catch(() => undefined)
+    }
+    load()
+    const timer = window.setInterval(load, 5000)
+    return () => { active = false; window.clearInterval(timer) }
   }, [])
 
-  // Muat pesan thread saat dipilih (sekali per percakapan → terasa cepat seperti WA).
+  // Muat pesan thread saat dipilih, lalu polling tiap 3 detik agar chat realtime.
   useEffect(() => {
     if (!selectedId) return
-    const target = conversations.find((conversation) => conversation.id === selectedId)
-    if (!target || target.messagesLoaded) return
     let active = true
-    fetch(`/api/conversations/${encodeURIComponent(selectedId)}/messages`).then(async (response) => {
-      if (!response.ok) throw new Error('messages unavailable')
-      const payload = await response.json() as { messages?: Array<{ role: string; content: string; createdAt?: string }> }
-      if (!active || !Array.isArray(payload.messages)) return
-      const mapped: Message[] = payload.messages.map((message) => ({
-        from: message.role === 'user' ? 'customer' : 'ai',
-        text: message.content,
-        time: messageTimeLabel(message.createdAt),
-      }))
-      setConversations((current) => current.map((conversation) => conversation.id === selectedId ? { ...conversation, messages: mapped, messagesLoaded: true } : conversation))
-    }).catch(() => {
-      if (active) setConversations((current) => current.map((conversation) => conversation.id === selectedId ? { ...conversation, messagesLoaded: true } : conversation))
-    })
-    return () => { active = false }
-  }, [selectedId, conversations])
+    const load = () => {
+      fetch(`/api/conversations/${encodeURIComponent(selectedId)}/messages`).then(async (response) => {
+        if (!response.ok) throw new Error('messages unavailable')
+        const payload = await response.json() as { messages?: Array<{ role: string; content: string; createdAt?: string }> }
+        if (!active || !Array.isArray(payload.messages)) return
+        const mapped: Message[] = payload.messages.map((message) => ({
+          from: message.role === 'user' ? 'customer' : 'ai',
+          text: message.content,
+          time: messageTimeLabel(message.createdAt),
+        }))
+        setConversations((current) => current.map((conversation) => conversation.id === selectedId ? { ...conversation, messages: mapped, messagesLoaded: true } : conversation))
+      }).catch(() => undefined)
+    }
+    load()
+    const timer = window.setInterval(load, 3000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [selectedId])
 
   const assignAgent = (agentId: string) => {
     const agent = agents.find((item) => item.id === agentId)
@@ -530,11 +545,61 @@ function DashboardApp() {
     })
   }, [conversations, filter, searchQuery])
 
+  // URL ⇄ state (dua arah): URL selalu merefleksikan percakapan yang sedang dibuka.
+  const inboxPathFor = (id: string | null) => (id ? `/app/inbox/${encodeURIComponent(id)}` : '/app/inbox')
+
   const navigate = (item: NavItem) => {
     setActiveNav(item)
     const route = item === 'Overview' ? '/app' : item === 'Inbox' ? '/app/inbox' : item === 'Knowledge base' ? '/app/knowledge' : item === 'Widget' ? '/app/widget' : item === 'AI Agent' ? '/app/agents' : '/app/analytics'
+    // Klik menu Inbox = kembali ke daftar, supaya URL (/app/inbox) cocok dengan tampilan.
+    if (item === 'Inbox') setSelectedId(null)
     window.history.replaceState({}, '', route)
   }
+
+  // Klik percakapan → buka thread-nya DAN tulis URL detail ke history (tombol Back bisa mundur antar percakapan).
+  const selectConversation = (id: string) => {
+    setSelectedId(id)
+    const next = inboxPathFor(id)
+    if (window.location.pathname !== next) window.history.pushState({ inboxId: id }, '', next)
+  }
+
+  // State → URL: perubahan selection lewat jalur lain (hapus/archive, percakapan baru) tetap sinkron.
+  useEffect(() => {
+    if (activeNav !== 'Inbox') return
+    const next = inboxPathFor(selectedId)
+    if (window.location.pathname !== next) window.history.replaceState({}, '', next)
+  }, [activeNav, selectedId])
+
+  // URL → state: Back/Forward browser (dan link detail hasil copy) ikut menggerakkan tampilan.
+  useEffect(() => {
+    const syncFromLocation = () => {
+      const currentPath = window.location.pathname
+      const detail = currentPath.match(/^\/app\/inbox\/(.+)$/)
+      if (detail) {
+        setActiveNav('Inbox')
+        setSelectedId(decodeURIComponent(detail[1]))
+        return
+      }
+      const navForPath: Record<string, NavItem> = {
+        '/app': 'Overview',
+        '/app/inbox': 'Inbox',
+        '/app/knowledge': 'Knowledge base',
+        '/app/widget': 'Widget',
+        '/app/analytics': 'Analytics',
+        '/app/agents': 'AI Agent',
+      }
+      const matched = navForPath[currentPath]
+      if (matched) {
+        setActiveNav(matched)
+        if (matched === 'Inbox') setSelectedId(null)
+        return
+      }
+      // Di luar dashboard (landing/login) → serahkan ke router di App.
+      window.location.reload()
+    }
+    window.addEventListener('popstate', syncFromLocation)
+    return () => window.removeEventListener('popstate', syncFromLocation)
+  }, [])
 
   const persistStatus = (conversationId: string, status: ConversationStatus) => {
     if (conversationId.startsWith('new-')) return
@@ -639,12 +704,12 @@ function DashboardApp() {
           <div className="topbar-actions"><div className="live-pill"><span className="live-pulse" /> All systems operational</div><button className="icon-button" aria-label="Help"><CircleHelp size={18} /></button><button className="icon-button" aria-label="Notifications"><span className="notification-dot" /><LifeBuoy size={18} /></button><a className="logout-link" href="/manus-oauth/logout">Log out</a></div>
         </header>
 
-        <div className="page-wrap">
+        <div className={`page-wrap${activeNav === 'Inbox' ? ' inbox-page' : ''}`}>
           {activeNav !== 'Inbox' && <div className="page-heading">
             <div><div className="eyebrow"><span className="eyebrow-line" /> TODAY · WEDNESDAY, 17 APR</div><h1>{activeNav}</h1><p>{activeNav === 'Overview' ? 'Ringkasan performa support & AI dalam 7 hari terakhir.' : activeNav === 'Knowledge base' ? 'Keep the AI grounded in your latest support knowledge.' : activeNav === 'Widget' ? 'Give every visitor a fast, human-feeling answer.' : activeNav === 'AI Agent' ? 'Pick which AI agents answer — the router fails over automatically when quota runs out.' : activeNav === 'Team' ? 'Kelola anggota tim support & role akses mereka.' : activeNav === 'Settings' ? 'Konfigurasi workspace, channel, notifikasi & integrasi.' : 'See how your support system is performing.'}</p></div>
           </div>}
 
-          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={setSelectedId} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} onThreadAction={handleThreadAction} /></div>}
+          {activeNav === 'Inbox' && <div className="inbox-fullscreen"><InboxView selected={selected} conversations={filteredConversations} selectedId={selectedId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} filter={filter} setFilter={setFilter} setSelectedId={selectConversation} composer={composer} setComposer={setComposer} sendMessage={sendMessage} updateSelectedStatus={updateSelectedStatus} setToast={setToast} onNewConversation={handleNewConversation} agents={agents} autoFallback={autoFallback} activeAgent={activeAgent} onAssignAgent={assignAgent} onRegenerate={regenerateSuggestion} regenerating={regenerating} onManageAgents={() => navigate('AI Agent')} onThreadAction={handleThreadAction} /></div>}
           {activeNav === 'Overview' && <OverviewView />}
           {activeNav === 'Knowledge base' && <KnowledgeView setToast={setToast} />}
           {activeNav === 'AI Agent' && <AgentsView agents={agents} autoFallback={autoFallback} saving={savingAgents} onSave={saveAgentSettings} />}
@@ -760,11 +825,11 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
       </div>}</div></div></div>
       <div className="search-field"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" /><kbd>⌘ K</kbd></div>
       <div className="filter-row"><FilterChip label="All" active={filter === 'All'} count="128" onClick={() => setFilter('All')} /><FilterChip label="Needs handoff" active={filter === 'Needs handoff'} count="12" onClick={() => setFilter('Needs handoff')} /><FilterChip label="Unread" active={false} count="6" onClick={() => setFilter('All')} /></div>
-      <div className="conversation-list">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => { setSelectedId(conversation.id); window.history.pushState({}, '', `/app/inbox/${conversation.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }} />)}{conversations.length === 0 && <div className="empty-state"><Search size={24} /><strong>No conversations found</strong><span>Try a different search or filter.</span></div>}</div>
+      <div className="conversation-list">{conversations.map((conversation) => <ConversationRow key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => setSelectedId(conversation.id)} />)}{conversations.length === 0 && <div className="empty-state"><Search size={24} /><strong>No conversations found</strong><span>Try a different search or filter.</span></div>}</div>
       <div className="list-footer"><span>Showing {conversations.length} of 128</span><button>View all <ArrowUpRight size={13} /></button></div>
     </section>
 
-    {selected ? <section className="thread-panel panel">
+    {selected ? <section className="thread-panel panel thread-enter" key={selected.id}>
       <div className="thread-header"><div className="contact-summary"><Avatar conversation={selected!} size="lg" /><div><div className="contact-name-row"><h2>{selected!.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={selected!.channel} small /> {selected!.channel}</span><span className="contact-location">{selected!.location}</span></div><div className="thread-actions"><AgentSelect agents={agents.filter((agent) => agent.enabled)} activeAgent={activeAgent} autoFallback={autoFallback} onAssign={onAssignAgent} onManage={onManageAgents} /><StatusBadge status={selected!.status} onClick={() => {
             const next = selected!.status === 'AI active' ? 'Needs handoff' : selected!.status === 'Needs handoff' ? 'Agent controlled' : selected!.status === 'Agent controlled' ? 'Resolved' : 'AI active'
             updateSelectedStatus(next, next === 'AI active' ? 'AI activated' : next === 'Needs handoff' ? 'Needs handoff flagged' : next === 'Agent controlled' ? 'You took over the conversation' : 'Conversation resolved')
@@ -798,146 +863,6 @@ function InboxView({ selected, conversations, selectedId, searchQuery, setSearch
   </div>
 }
 
-function ConversationPage({ path }: { path: string }) {
-  const id = decodeURIComponent(path.split('/app/inbox/')[1] ?? '')
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [loadingThread, setLoadingThread] = useState(true)
-  const conversation = conversations.find((item) => item.id === id) ?? null
-  const [composer, setComposer] = useState('')
-  const [attachment, setAttachment] = useState<{ name: string; url: string; type: string } | null>(null)
-  const [toast, setToast] = useState('')
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const imageInputRef = useRef<HTMLInputElement | null>(null)
-  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
-
-  useEffect(() => { if (!composer && composerTextareaRef.current) composerTextareaRef.current.style.height = '' }, [composer])
-
-  // Muat thread dari database (list + pesan) → halaman deep-link selalu data terbaru.
-  useEffect(() => {
-    if (!id) { setLoadingThread(false); return }
-    let active = true
-    Promise.all([
-      fetch(`/api/conversations/${encodeURIComponent(id)}/messages`).then((response) => (response.ok ? response.json() as Promise<{ messages?: Array<{ role: string; content: string; createdAt?: string }> }> : { messages: [] })),
-      fetch('/api/conversations').then((response) => (response.ok ? response.json() as Promise<{ data?: ApiConversationRow[] }> : { data: [] })),
-    ]).then(([messagesPayload, listPayload]) => {
-      if (!active) return
-      const row = (listPayload.data ?? []).find((item) => item.id === id)
-      const base = row ? mapApiConversation(row) : mapApiConversation({ id, updatedAt: new Date().toISOString(), status: 'AI' })
-      const mapped: Message[] = (messagesPayload.messages ?? []).map((message) => ({
-        from: message.role === 'user' ? 'customer' : 'ai',
-        text: message.content,
-        time: messageTimeLabel(message.createdAt),
-      }))
-      setConversations([{ ...base, messages: mapped, messagesLoaded: true }])
-    }).catch(() => undefined).finally(() => { if (active) setLoadingThread(false) })
-    return () => { active = false }
-  }, [id])
-
-  const pickFile = (file: File | undefined) => {
-    if (!file) return
-    if (file.size > 5 * 1024 * 1024) { setToast('File must be under 5 MB'); return }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const url = String(reader.result)
-      const type = file.type.startsWith('image/') ? 'image' : file.type.startsWith('application/') ? 'doc' : 'other'
-      setAttachment(prev => ({ name: file.name, url, type }))
-    }
-    reader.readAsDataURL(file)
-  }
-
-  const handleSend = () => {
-    if (!composer.trim() && !attachment) return
-    const text = composer.trim()
-    const attPreview = attachment?.type === 'image' ? attachment.url : attachment?.name || 'File attachment'
-    setConversations((current) => current.map((item) => item.id === conversation?.id ? {
-      ...item,
-      status: 'Agent controlled' as ConversationStatus,
-      preview: text || attPreview,
-      time: 'now',
-      messages: [...item.messages, { from: 'agent' as const, text, time: messageTimeLabel(), ...(attachment ? { attachment: attachment as Attachment } : {}) }],
-    } : item))
-    if (conversation && text) {
-      fetch('/api/conversations/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ conversationId: conversation.id, role: 'assistant', content: text }),
-      }).catch(() => undefined)
-      fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/status`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(uiStatusToDb('Agent controlled')),
-      }).catch(() => undefined)
-    }
-    setComposer('')
-    setAttachment(null)
-    setToast('Reply sent · AI paused for this thread')
-    window.setTimeout(() => setToast(''), 2400)
-  }
-
-  const takeOver = () => {
-    setConversations((current) => current.map((item) => item.id === conversation?.id ? { ...item, status: 'Agent controlled' as ConversationStatus } : item))
-    if (conversation) {
-      fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/status`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(uiStatusToDb('Agent controlled')),
-      }).catch(() => undefined)
-    }
-    setToast('You took over the conversation')
-    window.setTimeout(() => setToast(''), 2400)
-  }
-
-  if (loadingThread) {
-    return <div className="auth-callback"><div className="auth-callback-card"><div className="auth-card-icon"><Sparkles size={18} /></div><h1>SupportFlow</h1><p>Memuat percakapan dari database…</p></div></div>
-  }
-
-  if (!conversation) {
-    return <div className="auth-callback"><div className="auth-callback-card"><div className="auth-card-icon"><Sparkles size={18} /></div><h1>SupportFlow</h1><p>Percakapan tidak ditemukan.</p><a className="button button-primary" href="/app/inbox">Kembali ke inbox</a></div></div>
-  }
-
-  return (
-    <div className="app-shell" style={{height:'100vh'}}>
-      <aside className="sidebar">
-        <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true"><span /><span /><i /></div>
-          <div><div className="brand-name">SupportFlow</div><div className="brand-subtitle">AI support operations</div></div>
-        </div>
-        <div className="workspace-switcher">
-          <div className="workspace-avatar">N</div>
-          <div className="workspace-copy"><strong>Northstar Goods</strong><span>Workspace · Pro</span></div>
-          <ChevronDown size={15} />
-        </div>
-        <nav className="primary-nav" aria-label="Primary navigation">
-          <div className="nav-label">Workspace</div>
-          <NavButton icon={<LayoutDashboard size={17} />} label="Overview" onClick={() => { window.location.assign('/app'); }} />
-          <NavButton icon={<Inbox size={17} />} label="Inbox" active onClick={() => { window.location.assign('/app'); }} />
-          <NavButton icon={<Database size={17} />} label="Knowledge base" onClick={() => { window.location.assign('/app'); }} />
-          <NavButton icon={<Code2 size={17} />} label="Widget" onClick={() => { window.location.assign('/app'); }} />
-          <NavButton icon={<BarChart3 size={17} />} label="Analytics" onClick={() => { window.location.assign('/app'); }} />
-          <div className="nav-label nav-label-spaced">Manage</div>
-          <NavButton icon={<Bot size={17} />} label="AI Agent" onClick={() => { window.location.assign('/app'); }} />
-          <NavButton icon={<UsersRound size={17} />} label="Team" onClick={() => { window.location.assign('/app'); }} />
-          <NavButton icon={<Settings2 size={17} />} label="Settings" onClick={() => { window.location.assign('/app'); }} />
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="upgrade-card"><div className="upgrade-icon"><Zap size={15} /></div><div><strong>AI usage</strong><span>68% of monthly credits</span></div><ArrowUpRight size={15} /></div>
-          <div className="sidebar-user"><div className="user-avatar">AR</div><div><strong>Ayunda Rahma</strong><span>Admin</span></div><MoreHorizontal size={17} /></div>
-        </div>
-      </aside>
-      <main className="main-area" style={{height:'100vh', overflow:'hidden'}}>
-        <div className="conversation-page" style={{height:'100%'}}>
-          <div className="thread-panel panel">
-            <div className="thread-header"><button className="back-button" aria-label="Back to inbox" onClick={() => { window.history.pushState({}, '', '/app') }}><ChevronLeft size={18} /></button><div className="contact-summary"><Avatar conversation={conversation} size="lg" /><div><div className="contact-name-row"><h2>{conversation.name}</h2></div></div></div><div className="thread-meta"><span className="channel-label"><ChannelIcon channel={conversation.channel} small /> {conversation.channel}</span><span className="contact-location">{conversation.location}</span></div><div className="thread-actions"><StatusBadge status={conversation.status} /><button className="icon-button subtle" aria-label="More conversation actions"><MoreHorizontal size={18} /></button></div></div>
-            {conversation.status === 'Needs handoff' && <div className="handoff-banner"><div className="handoff-banner-icon"><AlertTriangle size={17} /></div><div><strong>Human handoff recommended</strong><span>An agent should review before sending.</span></div><button className="assign-button" onClick={takeOver}>Take over <ArrowUpRight size={14} /></button></div>}
-            <div className="thread-body"><div className="date-divider"><span>Today</span></div>{conversation.messages.map((message, index) => <MessageBubble key={`${conversation.id}-${index}`} message={message} conversation={conversation} />)}<TypingIndicator /></div>
-            <div className="composer"><div className="composer-top"><span className="composer-mode"><Bot size={14} /> {conversation.status === 'Agent controlled' ? 'Agent reply' : 'AI assisted reply'} <ChevronDown size={13} /></span><span className="composer-hint">Press ⌘ + Enter to send</span></div><textarea ref={composerTextareaRef} value={composer} onChange={(event) => { setComposer(event.target.value); growComposer(event) }} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) handleSend() }} placeholder="Write a reply…" aria-label="Write a reply" />{attachment && <div className="composer-attachment">{attachment.type === 'image' ? <img src={attachment.url} alt={attachment.name} /> : <span><div className="attachment-icon"><FileText size={16} /></div>{attachment.name}</span>}<button type="button" aria-label="Remove attachment" onClick={() => setAttachment(null)}>×</button></div>}<div className="composer-bottom"><div className="composer-tools"><button aria-label="Attach file" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button><button aria-label="Attach image" onClick={() => imageInputRef.current?.click()}><Image size={16} /></button></div><button className="send-button" onClick={handleSend}><Send size={15} /> Send reply</button></div><input ref={fileInputRef} type="file" accept="*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /><input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => { pickFile(event.target.files?.[0]); event.target.value = '' }} /></div>
-          </div>
-        </div>
-        {toast && <div className="toast"><CheckCircle2 size={17} /> {toast}</div>}
-      </main>
-    </div>
-  )
-}
 
 function FilterChip({ label, active, count, onClick }: { label: string; active: boolean; count: string; onClick: () => void }) {
   return <button className={`filter-chip ${active ? 'active' : ''}`} onClick={onClick}>{label}<span>{count}</span></button>
@@ -1072,15 +997,31 @@ function KnowledgeView({ setToast }: { setToast: (value: string) => void }) {
 }
 
 const WIDGET_EMBED_SNIPPET = [
-  '<script src="https://unpkg.com/supportflow-widget/src/widget.js"></script>',
-  '<script>',
+  '<!-- Note: URL script dipastikan mengembalikan JS (bukan HTML) lewat endpoint /api/widget dengan Content-Type: application/javascript. Pastikan pastekan SEBELUM tag </body>. -->',
+  '<script src="/api/widget"></script>',
+  '<script src="/supportflow-widget-fallback.js"></script>',
+  '  // Set config SEBELUM script widget agar widget-initialized saat load.',
   '  window.SUPPORTFLOW_WIDGET_CONFIG = {',
-  '    baseUrl: "https://YOUR-SUPPORTFLOW-HOST",',
+  '    baseUrl: "/",',
   '    conversationId: "your-conversation-id",',
-  '    title: "Northstar concierge",',
   '    accentColor: "#4263eb",',
   '    endpoints: "*"',
   '  }',
+  '</script>',
+  '<script src="/api/widget" type="text/javascript"></script>',
+  '<!-- Fallback FloatingChat jika script gagal load. Cek jika widget-ready gagal. -->',
+  '<script>',
+  '  (function() {',
+'      try {',
+  '    if (typeof window.SupportFlowWidget === "undefined") {',
+  '      // Script gagal load → tampilkan fallback FloatingChat kustom.',
+  '      var css = "div.sf-fallback { position: fixed; bottom: 20px; right: 20px; z-index: 9999; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; } div.sf-fallback button { background: #4263eb; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }";',
+  '      var btn = document.createElement("div");',
+  '      btn.className = "sf-fallback";',
+  '    } catch(e) {',
+  '      console.error("Widget load error (fallback active): " + e);',
+  '    }',
+  '  })();',
   '</script>',
 ].join('\n')
 
@@ -1187,6 +1128,32 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
       window.setTimeout(() => setToast(''), 2400)
     }
   }
+
+const testAgentConnection = async (agent: AiAgent, apiKey: string, onResult: (result: { success: boolean; latency: number; message?: string; error?: string }) => void) => {
+  if (!agent.apiUrl || !apiKey) {
+    onResult({ success: false, latency: 0, error: 'API URL dan API key wajib diisi' })
+    return
+  }
+
+  try {
+    const response = await fetch('/api/agents/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { id: agent.id, name: agent.name, model: agent.model, apiUrl: agent.apiUrl, apiKey } }),
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      onResult({ success: false, latency: 0, error: error.error || 'HTTP error' })
+      return
+    }
+
+    const result = await response.json()
+    onResult(result)
+  } catch (error) {
+    onResult({ success: false, latency: 0, error: error instanceof Error ? error.message : 'Connection failed' })
+  }
+}
 
   const copyEmbedCode = async () => {
     try {
@@ -1434,6 +1401,10 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
   const [draft, setDraft] = useState<AgentDraft[]>(() => agents.map((agent) => ({ ...agent, apiKeyInput: '' })))
   const [draftFallback, setDraftFallback] = useState(autoFallback)
   const [dirty, setDirty] = useState(false)
+  const [testingAgent, setTestingAgent] = useState<AgentDraft[]>([])
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; latency: number; message?: string; error?: string }>>({})
+  const [testingAgent, setTestingAgent] = useState<AgentDraft | null>(null)
+  const [testResult, setTestResult] = useState<string | null>(null)
 
   useEffect(() => {
     setDraft(agents.map((agent) => ({ ...agent, apiKeyInput: '' })))
@@ -1471,6 +1442,15 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
   const enabledDraft = draft.filter((agent) => agent.enabled)
   const readyCount = draft.filter((agent) => agent.enabled && agent.status === 'ready').length
 
+  const handleTestConnection = async (agent: AgentDraft) => {
+    setTestingAgent([agent])
+    setTestResults((prev) => ({ ...prev, [agent.id]: { loading: true } }))
+    testAgentConnection(agent, agent.apiKeyInput || '', (result) => {
+      setTestResults((prev) => ({ ...prev, [agent.id]: result }))
+      setTestingAgent([])
+    })
+  }
+
   return (
     <div className="secondary-layout">
       <div className="section-toolbar actions-only">
@@ -1496,10 +1476,19 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
             </div>
             <div className="agent-card-actions">
               <button type="button" className={`toggle ${agent.enabled ? 'on' : ''}`} aria-label={agent.enabled ? `Disable ${agent.name}` : `Enable ${agent.name}`} onClick={() => patchAgent(agent.id, { enabled: !agent.enabled })}><span /></button>
+              <button type="button" className={`test-button ${testingAgent.some(a => a.id === agent.id) ? 'testing' : ''}`} aria-label="Test connection" onClick={() => handleTestConnection(agent)}><Radio size={14} /> Test connection</button>
               <button type="button" className="icon-mini" aria-label="Move up" disabled={index === 0} onClick={() => moveAgent(index, -1)}><ChevronUp size={14} /></button>
               <button type="button" className="icon-mini" aria-label="Move down" disabled={index === draft.length - 1} onClick={() => moveAgent(index, 1)}><ChevronDown size={14} /></button>
               <button type="button" className="icon-mini" aria-label="Remove agent" onClick={() => removeAgent(agent.id)}><Trash2 size={14} /></button>
             </div>
+            {testResults[agent.id] && (
+              <div className={`agent-test-result ${testResults[agent.id].success ? 'success' : 'error'}`}>
+                {testResults[agent.id].loading ? 'Testing...' : testResults[agent.id].success ? `${testResults[agent.id].latency}ms - Connected` : `Failed: ${testResults[agent.id].error || 'Unknown error'}`}
+                {testResults[agent.id].success && testResults[agent.id].message && (
+                  <div className="agent-test-message">{testResults[agent.id].message}</div>
+                )}
+              </div>
+            )}
           </div>
         ))}
         {draft.length === 0 && <div className="empty-state"><Bot size={26} /><strong>No AI agents yet</strong><span>Add an agent so the router has somewhere to send replies.</span></div>}
@@ -1701,7 +1690,7 @@ function App() {
   if (path === '/register') return <AuthPage mode="register" />
   if (!isPrivateRoute) return <LandingPage />
   if (session === 'loading' || session === 'anonymous') return <div className="auth-callback"><div className="auth-callback-card"><div className="auth-card-icon"><Sparkles size={18} /></div><h1>SupportFlow</h1><p>{session === 'loading' ? 'Checking your workspace session…' : 'Redirecting to secure login…'}</p></div></div>
-  if (isConversationRoute) return <ConversationPage path={path} />
+  if (isConversationRoute) return <DashboardApp initialInboxId={path.split('/app/inbox/')[1] ? decodeURIComponent(path.split('/app/inbox/')[1]) : undefined} />
   return <DashboardApp />
 }
 

@@ -12,6 +12,7 @@ import {
   agentsSummary,
   callAgentWithRouter,
   EXHAUSTED_COOLDOWN_MS,
+  testAgentConnection,
   type AgentConfig,
 } from './agents.js'
 
@@ -462,6 +463,20 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
       return json(response, { ok: true, persistence: persistenceMode, agents: await listAgents(), autoFallback: getAutoFallback() })
     } catch (error) {
       return json(response, { error: error instanceof Error ? error.message : 'Invalid agent settings' }, 400)
+    }
+  }
+  if (method === 'POST' && url.pathname === '/api/agents/test') {
+    const identity = cookies[SESSION_COOKIE] ? verifyJwt(cookies[SESSION_COOKIE]) : null
+    if (!identity) return json(response, { error: 'Authentication required' }, 401)
+    try {
+      const body = JSON.parse(await readBody(request)) as { agentId?: string; agent?: Partial<AgentConfig> }
+      if (!body.agent) return json(response, { error: 'agent config is required' }, 400)
+
+      const testAgent = await testAgentConnection(body.agent as AgentConfig)
+
+      return json(response, testAgent)
+    } catch (error) {
+      return json(response, { error: error instanceof Error ? error.message : 'Test failed' }, 500)
     }
   }
 

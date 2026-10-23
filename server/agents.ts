@@ -9,6 +9,8 @@
  */
 import { systemPrompt } from './knowledge-base.js'
 
+const TEST_MESSAGE = 'Hello'
+
 export type AgentConfig = {
   id: string
   name: string
@@ -42,6 +44,7 @@ export type RouterResult = {
 export type AgentsPersistence = {
   load: () => Promise<{ agents: AgentConfig[]; autoFallback: boolean } | null>
   save: (agents: AgentConfig[], autoFallback: boolean) => Promise<void>
+  recordUsage?: (agentId: string, model: string, usage: { promptTokens: number; completionTokens: number }) => Promise<void>
 }
 
 export const EXHAUSTED_COOLDOWN_MS = 5 * 60_000
@@ -209,6 +212,41 @@ const orderChain = (agents: AgentConfig[], preferredAgentId?: string) => {
   const preferred = agents.find((agent) => agent.id === preferredAgentId)
   if (!preferred) return agents
   return [preferred, ...agents.filter((agent) => agent.id !== preferred.id)]
+}
+
+/**
+ * Test single agent connection - minimal request (no knowledge base).
+ * Returns structured test result with latency and error details.
+ */
+export const testAgentConnection = async (
+  agent: AgentConfig
+): Promise<{ success: boolean; latency: number; error?: string; message?: string }> => {
+  const start = Date.now()
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+    const response = await fetch(resolveCompletionsUrl(agent.apiUrl), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: agent.model, messages: [{ role: 'user', content: TEST_MESSAGE }] }),
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { success: false, latency: Date.now() - start, error: `HTTP ${response.status}: ${errorData.error?.message || response.statusText}` }
+    }
+
+    const data = await response.json()
+    const content = data.choices?.[0]?.message?.content?.trim()
+    if (!content) return { success: false, latency: Date.now() - start, error: 'Empty response from AI' }
+
+    return { success: true, latency: Date.now() - start, message: content.slice(0, 200) }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Connection failed'
+    return { success: false, latency: Date.now() - start, error: message }
+  }
 }
 
 /**

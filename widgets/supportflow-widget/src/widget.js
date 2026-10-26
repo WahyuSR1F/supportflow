@@ -163,7 +163,10 @@
       destroyed: false,
       messages: [],
       pollTimer: null,
-      lastMessageCount: 0
+      pollBusy: false,
+      sawServerHistory: false,
+      seenIds: new Set(),
+      seenContents: new Set()
     }
     var canChat = isAllowed(config, 'chat')
     state.messages.push(canChat
@@ -259,21 +262,40 @@
     }
 
     async function loadHistory() {
+      if (state.pollBusy) return
+      state.pollBusy = true
       try {
         var payload = await request(config, 'history', { method: 'GET' })
-        if (state.destroyed || !payload || !Array.isArray(payload.messages) || !payload.messages.length) return
-        var newMessages = payload.messages
+        if (state.destroyed) return
+        var serverMessages = (payload && Array.isArray(payload.messages) ? payload.messages : [])
           .filter(function (m) { return m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' })
-          .map(function (m) { return { id: m.id || m.content, role: m.role, content: m.content } })
-        // Dedup by id/content to avoid duplicates
-        var existingIds = new Set(state.messages.map(function (m) { return m.id || m.content }))
-        var toAppend = newMessages.filter(function (m) { return !existingIds.has(m.id || m.content) })
-        if (toAppend.length > 0) {
-          state.messages = state.messages.concat(toAppend)
-          if (!state.messages.length) state.messages = [{ role: 'assistant', content: config.greeting }]
-          render()
+          .map(function (m) { return { id: m.id ? String(m.id) : '', role: m.role, content: m.content } })
+        var fresh = serverMessages.filter(function (m) {
+          var contentKey = m.role + ':' + m.content
+          if (m.id && state.seenIds.has(m.id)) return false
+          if (state.seenContents.has(contentKey)) return false
+          return true
+        })
+        if (!state.sawServerHistory) {
+          state.sawServerHistory = true
+          if (serverMessages.length) {
+            // Riwayat server = sumber kebenaran: ganti greeting agar urutan chat benar.
+            state.messages = serverMessages.slice()
+          }
+        } else if (fresh.length) {
+          state.messages = state.messages.concat(fresh)
         }
-      } catch (error) { /* riwayat opsional */ }
+        serverMessages.forEach(function (m) {
+          if (m.id) state.seenIds.add(m.id)
+          state.seenContents.add(m.role + ':' + m.content)
+        })
+        if (!state.messages.length) state.messages = [{ role: 'assistant', content: config.greeting }]
+        render()
+      } catch (error) {
+        console.warn('[supportflow-widget] history sync gagal:', error && error.message ? error.message : error)
+      } finally {
+        state.pollBusy = false
+      }
     }
 
   function startPolling() {
@@ -283,7 +305,7 @@
           if (isAllowed(config, 'history')) loadHistory()
           if (isAllowed(config, 'conversations')) checkHandoff()
         }
-      }, 4000)
+      }, 3000)
     }
 
   function stopPolling() {
@@ -325,6 +347,7 @@
       var text = input.value.trim()
       if (!text || state.pending || !canChat) return
       state.messages.push({ role: 'user', content: text })
+      state.seenContents.add('user:' + text)
       input.value = ''
       state.pending = true
       render()
@@ -342,6 +365,7 @@
         })
         if (!payload || typeof payload.message !== 'string') throw new Error('Balasan AI tidak valid')
         state.messages.push({ role: 'assistant', content: payload.message })
+        state.seenContents.add('assistant:' + payload.message)
         if (payload.status === 'HUMAN_HANDOFF') {
           state.handoff = true
           updateStatus()
@@ -355,6 +379,7 @@
         state.pending = false
         if (!state.destroyed) sendBtn.disabled = false
         render()
+        if (!state.destroyed && isAllowed(config, 'history')) void loadHistory()
       }
     }
 
@@ -371,6 +396,8 @@
       close: function () { setOpen(false) },
       toggle: function () { setOpen(!state.open) },
       isAllowed: function (endpointId) { return isAllowed(config, endpointId) },
+      reloadHistory: function () { void loadHistory() },
+      debugState: function () { return { open: state.open, pending: state.pending, handoff: state.handoff, messageCount: state.messages.length, conversationId: config.conversationId } },
       destroy: function () {
         state.destroyed = true
         stopPolling()

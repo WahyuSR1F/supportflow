@@ -997,32 +997,17 @@ function KnowledgeView({ setToast }: { setToast: (value: string) => void }) {
 }
 
 const WIDGET_EMBED_SNIPPET = [
-  '<!-- Note: URL script dipastikan mengembalikan JS (bukan HTML) lewat endpoint /api/widget dengan Content-Type: application/javascript. Pastikan pastekan SEBELUM tag </body>. -->',
-  '<script src="/api/widget"></script>',
-  '<script src="/supportflow-widget-fallback.js"></script>',
-  '  // Set config SEBELUM script widget agar widget-initialized saat load.',
+  '<!-- SupportFlow chat widget — tempel utuh SEBELUM tag </body> di halaman tujuan. -->',
+  '<!-- Balasan CS dari inbox muncul OTOMATIS (polling 3 detik) saat panel chat terbuka. -->',
+  '<script>',
   '  window.SUPPORTFLOW_WIDGET_CONFIG = {',
-  '    baseUrl: "/",',
-  '    conversationId: "your-conversation-id",',
-  '    accentColor: "#4263eb",',
-  '    endpoints: "*"',
+  '    baseUrl: "https://supportflow-alpha.vercel.app",',
+  '    conversationId: "",',
+  '    title: "SupportFlow",',
+  '    accentColor: "#4263eb"',
   '  }',
   '</script>',
-  '<script src="/api/widget" type="text/javascript"></script>',
-  '<!-- Fallback FloatingChat jika script gagal load. Cek jika widget-ready gagal. -->',
-  '<script>',
-  '  (function() {',
-'      try {',
-  '    if (typeof window.SupportFlowWidget === "undefined") {',
-  '      // Script gagal load → tampilkan fallback FloatingChat kustom.',
-  '      var css = "div.sf-fallback { position: fixed; bottom: 20px; right: 20px; z-index: 9999; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; } div.sf-fallback button { background: #4263eb; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }";',
-  '      var btn = document.createElement("div");',
-  '      btn.className = "sf-fallback";',
-  '    } catch(e) {',
-  '      console.error("Widget load error (fallback active): " + e);',
-  '    }',
-  '  })();',
-  '</script>',
+  '<script src="https://supportflow-alpha.vercel.app/supportflow-widget.js?v=3"></script>',
 ].join('\n')
 
 function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boolean; setWidgetOpen: (value: boolean) => void; setToast: (value: string) => void }) {
@@ -1169,9 +1154,10 @@ const testAgentConnection = async (agent: AiAgent, apiKey: string, onResult: (re
         <div className="install-body">
           <ol className="install-steps">
             <li>Klik <strong>Salin kode</strong> untuk menyalin snippet di sebelahnya.</li>
-            <li>Tempel sebelum tag <code>&lt;/body&gt;</code> pada halaman HTML aplikasi tujuan.</li>
-            <li>Ganti <code>baseUrl</code> dengan URL backend SupportFlow kamu, dan isi <code>conversationId</code> biperlukan.</li>
-            <li>Buka halaman tersebut — launcher widget siap dipakai.</li>
+            <li>Tempel utuh snippet <em>sebelum</em> tag <code>&lt;/body&gt;</code> pada halaman HTML aplikasi tujuan.</li>
+            <li><code>baseUrl</code> sudah mengarah ke backend SupportFlow — tidak perlu diubah.</li>            <li><code>conversationId</code> biarkan kosong: setiap pengunjung otomatis mendapat chat unik sendiri dan riwayatnya tidak tercampur dengan pengunjung lain.</li>
+            <li>Simpan halaman, lalu <strong>Ctrl+F5</strong> (hard refresh) sekali kali agar script widget terbaru ter-load.</li>
+            <li>Buka panel chat — balasan CS dari inbox SupportFlow muncul otomatis (paling lama 3 detik).</li>
           </ol>
           <pre className="install-snippet"><code>{WIDGET_EMBED_SNIPPET}</code></pre>
           <div className="install-alt">Cara lain (proyek npm): <code>npm install supportflow-widget</code> lalu <code>npx supportflow-widget init</code>, atau dari React/Vue/Next.js panggil <code>{'SupportFlowWidget.init({ baseUrl, conversationId, title, accentColor })'}</code>.</div>

@@ -161,7 +161,9 @@
       historyLoaded: false,
       handoff: false,
       destroyed: false,
-      messages: []
+      messages: [],
+      pollTimer: null,
+      lastMessageCount: 0
     }
     var canChat = isAllowed(config, 'chat')
     state.messages.push(canChat
@@ -249,6 +251,10 @@
         }
         if (isAllowed(config, 'conversations')) checkHandoff()
         if (canChat) input.focus()
+        // Start polling history & handoff status
+        startPolling()
+      } else {
+        stopPolling()
       }
     }
 
@@ -256,12 +262,35 @@
       try {
         var payload = await request(config, 'history', { method: 'GET' })
         if (state.destroyed || !payload || !Array.isArray(payload.messages) || !payload.messages.length) return
-        state.messages = payload.messages
+        var newMessages = payload.messages
           .filter(function (m) { return m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' })
-          .map(function (m) { return { role: m.role, content: m.content } })
-        if (!state.messages.length) state.messages = [{ role: 'assistant', content: config.greeting }]
-        render()
+          .map(function (m) { return { id: m.id || m.content, role: m.role, content: m.content } })
+        // Dedup by id/content to avoid duplicates
+        var existingIds = new Set(state.messages.map(function (m) { return m.id || m.content }))
+        var toAppend = newMessages.filter(function (m) { return !existingIds.has(m.id || m.content) })
+        if (toAppend.length > 0) {
+          state.messages = state.messages.concat(toAppend)
+          if (!state.messages.length) state.messages = [{ role: 'assistant', content: config.greeting }]
+          render()
+        }
       } catch (error) { /* riwayat opsional */ }
+    }
+
+  function startPolling() {
+      if (state.pollTimer) clearInterval(state.pollTimer)
+      state.pollTimer = setInterval(function () {
+        if (state.open && !state.destroyed) {
+          if (isAllowed(config, 'history')) loadHistory()
+          if (isAllowed(config, 'conversations')) checkHandoff()
+        }
+      }, 4000)
+    }
+
+  function stopPolling() {
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer)
+        state.pollTimer = null
+      }
     }
 
     async function checkHandoff() {
@@ -344,6 +373,7 @@
       isAllowed: function (endpointId) { return isAllowed(config, endpointId) },
       destroy: function () {
         state.destroyed = true
+        stopPolling()
         host.remove()
       }
     }

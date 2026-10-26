@@ -148,8 +148,8 @@ const persistMessage = async (conversationId: string, message: StoredMessage) =>
 const loadHistory = async (conversationId: string, limit = 200) => {
   const db = await ensureDatabase()
   const safeLimit = Math.min(Math.max(Number(limit) || 80, 1), 500)
-  const result = await db.execute({ sql: 'SELECT role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC LIMIT ?', args: [conversationId, safeLimit] })
-  return result.rows.map((row) => ({ role: String(row.role) as StoredMessage['role'], content: String(row.content), createdAt: String(row.created_at) }))
+  const result = await db.execute({ sql: 'SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC LIMIT ?', args: [conversationId, safeLimit] })
+  return result.rows.map((row) => ({ id: String(row.id), role: String(row.role) as StoredMessage['role'], content: String(row.content), createdAt: String(row.created_at) }))
 }
 
 const setConversationStatus = async (conversationId: string, status: ConversationStatus, reason = '') => {

@@ -248,11 +248,11 @@
       panel.classList.toggle('open', next)
       launcher.setAttribute('aria-expanded', String(next))
       if (next) {
-        if (!state.historyLoaded && isAllowed(config, 'history')) {
+        if (!state.historyLoaded) {
           state.historyLoaded = true
           loadHistory()
         }
-        if (isAllowed(config, 'conversations')) checkHandoff()
+        checkHandoff()
         if (canChat) input.focus()
         // Start polling history & handoff status
         startPolling()
@@ -302,8 +302,8 @@
       if (state.pollTimer) clearInterval(state.pollTimer)
       state.pollTimer = setInterval(function () {
         if (state.open && !state.destroyed) {
-          if (isAllowed(config, 'history')) loadHistory()
-          if (isAllowed(config, 'conversations')) checkHandoff()
+          loadHistory()
+          checkHandoff()
         }
       }, 3000)
     }
@@ -379,7 +379,7 @@
         state.pending = false
         if (!state.destroyed) sendBtn.disabled = false
         render()
-        if (!state.destroyed && isAllowed(config, 'history')) void loadHistory()
+        if (!state.destroyed) void loadHistory()
       }
     }
 

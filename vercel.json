@@ -4,10 +4,13 @@
   "installCommand": "pnpm install",
   "buildCommand": "VITE_CONFIG_NATIVE_IGNORE_WARNING=true pnpm build",
   "outputDirectory": "dist",
+  "redirects": [
+    { "source": "/api/widget", "destination": "/supportflow-widget.js", "permanent": false }
+  ],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api?sfpath=/api/:path*" },
     { "source": "/manus-oauth/:path*", "destination": "/api?sfpath=/manus-oauth/:path*" },
-    { "source": "/:path((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/index.ts": { "maxDuration": 30 }

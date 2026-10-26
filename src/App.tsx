@@ -1129,7 +1129,7 @@ function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boole
     }
   }
 
-const testAgentConnection = async (agent: AiAgent, apiKey: string, onResult: (result: { success: boolean; latency: number; message?: string; error?: string }) => void) => {
+const testAgentConnection = async (agent: AiAgent, apiKey: string, onResult: (result: any) => void) => {
   if (!agent.apiUrl || !apiKey) {
     onResult({ success: false, latency: 0, error: 'API URL dan API key wajib diisi' })
     return
@@ -1403,8 +1403,6 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
   const [dirty, setDirty] = useState(false)
   const [testingAgent, setTestingAgent] = useState<AgentDraft[]>([])
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; latency: number; message?: string; error?: string }>>({})
-  const [testingAgent, setTestingAgent] = useState<AgentDraft | null>(null)
-  const [testResult, setTestResult] = useState<string | null>(null)
 
   useEffect(() => {
     setDraft(agents.map((agent) => ({ ...agent, apiKeyInput: '' })))
@@ -1444,9 +1442,16 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
 
   const handleTestConnection = async (agent: AgentDraft) => {
     setTestingAgent([agent])
-    setTestResults((prev) => ({ ...prev, [agent.id]: { loading: true } }))
-    testAgentConnection(agent, agent.apiKeyInput || '', (result) => {
+    fetch('/api/agents/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { id: agent.id, name: agent.name, model: agent.model, apiUrl: agent.apiUrl, apiKey: agent.apiKeyInput || '' } }),
+    }).then(async (response) => {
+      const result = await response.json()
       setTestResults((prev) => ({ ...prev, [agent.id]: result }))
+      setTestingAgent([])
+    }).catch(() => {
+      setTestResults((prev) => ({ ...prev, [agent.id]: { success: false, latency: 0, error: 'Network error' } }))
       setTestingAgent([])
     })
   }
@@ -1483,7 +1488,7 @@ function AgentsView({ agents, autoFallback, saving, onSave }: { agents: AiAgent[
             </div>
             {testResults[agent.id] && (
               <div className={`agent-test-result ${testResults[agent.id].success ? 'success' : 'error'}`}>
-                {testResults[agent.id].loading ? 'Testing...' : testResults[agent.id].success ? `${testResults[agent.id].latency}ms - Connected` : `Failed: ${testResults[agent.id].error || 'Unknown error'}`}
+                {testResults[agent.id].success ? `${testResults[agent.id].latency}ms - Connected` : `Failed: ${testResults[agent.id].error || 'Unknown error'}`}
                 {testResults[agent.id].success && testResults[agent.id].message && (
                   <div className="agent-test-message">{testResults[agent.id].message}</div>
                 )}

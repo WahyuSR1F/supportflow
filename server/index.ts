@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createClient } from '@libsql/client'
-import { HANDOFF_ACKNOWLEDGEMENT, OUT_OF_SCOPE_HANDOFF, HANDOFF_MARKER, isEscalationRequest, answerFromKnowledgeBase } from './knowledge-base.js'
+import { HANDOFF_ACKNOWLEDGEMENT, AGENT_TAKEOVER_ACKNOWLEDGEMENT, RESOLVED_ACKNOWLEDGEMENT, OUT_OF_SCOPE_HANDOFF, HANDOFF_MARKER, isEscalationRequest, answerFromKnowledgeBase } from './knowledge-base.js'
 import { registerWithEmailAndPassword, loginWithEmailAndPassword, googleConfigured, googleAuthUrl, exchangeGoogleCode, signSessionJwt } from './auth.js'
 import {
   registerAgentsPersistence,
@@ -722,7 +722,7 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
   }
   if (method === 'PATCH' && url.pathname.startsWith('/api/conversations/')) {
     if (!requireSession()) return json(response, { error: 'Authentication required' }, 401)
-    const conversationId = conversationIdFromPath('/api/conversations/')
+    const conversationId = conversationIdFromPath('/api/conversations/').replace(/\/status$/, '')
     if (!conversationId) return json(response, { error: 'conversationId is required' }, 400)
     try {
       const body = JSON.parse(await readBody(request)) as { status?: string; reason?: string }
@@ -886,7 +886,28 @@ export async function handleSupportFlowApi(request: IncomingMessage, response: S
       let persistence = 'unavailable'
       try { await persistMessage(conversationId, messages[messages.length - 1]); persistence = 'turso' } catch { /* keep AI response available if persistence is temporarily unavailable */ }
       if (current?.status === 'HUMAN_HANDOFF') {
-        return json(response, { id: `msg_${Date.now()}`, status: 'HUMAN_HANDOFF', confidence: 1, citations: [], conversationId, persistence, message: HANDOFF_ACKNOWLEDGEMENT })
+        const agentTakeover = current.reason.startsWith('agent')
+        return json(response, {
+          id: `msg_${Date.now()}`,
+          status: 'HUMAN_HANDOFF',
+          confidence: 1,
+          citations: [],
+          conversationId,
+          persistence,
+          message: agentTakeover ? AGENT_TAKEOVER_ACKNOWLEDGEMENT : HANDOFF_ACKNOWLEDGEMENT,
+          agentTakeover
+        })
+      }
+      if (current?.status === 'RESOLVED') {
+        return json(response, {
+          id: `msg_${Date.now()}`,
+          status: 'RESOLVED',
+          confidence: 1,
+          citations: [],
+          conversationId,
+          persistence,
+          message: RESOLVED_ACKNOWLEDGEMENT
+        })
       }
       const latestUserText = messages[messages.length - 1].content
       const userRequestedHuman = isEscalationRequest(latestUserText)

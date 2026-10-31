@@ -1007,7 +1007,7 @@ const WIDGET_EMBED_SNIPPET = [
   '    accentColor: "#4263eb"',
   '  }',
   '</script>',
-  '<script src="https://supportflow-alpha.vercel.app/supportflow-widget.js?v=4"></script>',
+  '<script src="https://supportflow-alpha.vercel.app/supportflow-widget.js?v=5"></script>',
 ].join('\n')
 
 function WidgetView({ widgetOpen, setWidgetOpen, setToast }: { widgetOpen: boolean; setWidgetOpen: (value: boolean) => void; setToast: (value: string) => void }) {

@@ -376,8 +376,10 @@
           })
         })
         if (!payload || typeof payload.message !== 'string') throw new Error('Balasan AI tidak valid')
-        state.messages.push({ role: 'assistant', content: payload.message })
-        state.seenContents.add('assistant:' + payload.message)
+        if (!payload.agentTakeover && payload.message) {
+          state.messages.push({ role: 'assistant', content: payload.message })
+          state.seenContents.add('assistant:' + payload.message)
+        }
         if (payload.status === 'HUMAN_HANDOFF') {
           state.handoff = true
           updateStatus()

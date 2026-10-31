@@ -78,7 +78,19 @@
       error.code = 'ENDPOINT_DISABLED'
       throw error
     }
-    var response = await fetch(config.baseUrl + catalogPath(endpointId), options)
+    var opts = options || {}
+    var query = opts.query
+    if (query) {
+      opts = Object.assign({}, opts)
+      delete opts.query
+    }
+    var qs = query
+      ? Object.keys(query)
+          .filter(function (key) { return query[key] !== undefined && query[key] !== null && query[key] !== '' })
+          .map(function (key) { return encodeURIComponent(key) + '=' + encodeURIComponent(query[key]) })
+          .join('&')
+      : ''
+    var response = await fetch(config.baseUrl + catalogPath(endpointId) + (qs ? '?' + qs : ''), opts)
     var payload = null
     try { payload = await response.json() } catch (error) { /* non-JSON body */ }
     if (!response.ok) {
@@ -265,7 +277,7 @@
       if (state.pollBusy) return
       state.pollBusy = true
       try {
-        var payload = await request(config, 'history', { method: 'GET' })
+        var payload = await request(config, 'history', { method: 'GET', query: { conversationId: config.conversationId } })
         if (state.destroyed) return
         var serverMessages = (payload && Array.isArray(payload.messages) ? payload.messages : [])
           .filter(function (m) { return m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' })
